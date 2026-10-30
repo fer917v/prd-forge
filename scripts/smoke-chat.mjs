@@ -135,5 +135,5 @@ if (!text) {
   fail('The agent answered, but with no text part. The transport works; the model did not reply.');
 }
 
-console.log(`← ${text.slice(0, 300)}`);
+console.log(`← ${text}`);
 console.log('\n✔ Chat round trip verified end to end.');

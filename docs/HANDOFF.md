@@ -12,10 +12,10 @@
 
 ## 1. Current state (overwrite on each handoff)
 
-**PRDForge — wave 1 skeleton, unbooted.** This project is the `prdforge-ledger` service: the deterministic system of record behind the `prdforge` Claude skill (`docs/PRD.md`, `docs/AGENT_SPEC.md`, `docs/DATA_MODEL.md`, `docs/SKILL.md`, `docs/NEXT_STEPS.md`). One Mastra agent, no reasoning, 29 tools, a Drizzle schema in the `prdforge` Postgres schema, boot-time migrate + Annex A control seed, rubrics shipped in the image.
+**PRDForge — wave 1 skeleton, booted and answering on the user's Mac.** This project is the `prdforge-ledger` service: the deterministic system of record behind the `prdforge` Claude skill (`docs/PRD.md`, `docs/AGENT_SPEC.md`, `docs/DATA_MODEL.md`, `docs/SKILL.md`, `docs/NEXT_STEPS.md`). One Mastra agent, no reasoning, 29 tools, a Drizzle schema in the `prdforge` Postgres schema, boot-time migrate + Annex A control seed, rubrics shipped in the image.
 
 - Green: `pnpm verify:poc`, `pnpm -F @precast/shared test` (28), `pnpm -F @precast/agents test` (152), `pnpm -F @precast/agents build`.
-- **Never booted against Postgres** — the scaffold session could not reach AgentBase (PROGRESS B1), so there is no provisioned database and the model in `.env` is the placeholder `pending-until-connected`.
+- **Live on the Mac** (`~/Documents/prdforge`, the canonical copy): database `prdforge_13c568bc` provisioned, model `gemini-35-flash-dd840ef8`, boot log `prdforge ledger ready — 93 Annex A controls seeded`. Via `pnpm smoke:chat`: `run_create` → run `e62b51be-0b24-4abd-ac39-386a474938e8`, `ledger_create_sections` → 18. The grammar-gate rejection is not yet confirmed (truncated output). Agent sessions still cannot reach `*.917v.ai` (B1) — the user runs AgentBase commands in Terminal.
 - Built tools: run lifecycle, facts, workflow, sections, requirements (grammar pre-check + lineage-stable ids + open questions), revisions (human text protected), narratives, mappings, findings, decisions, slice reads, summary, trace audit, similarity, coverage, snapshot write (unreconciled-read guard), render, approval (hash + blocking-finding checks).
 - Stubs returning `blocked:not_implemented`: `snapshot_diff`, `bundle_compile`, `bundle_verify`, `bundle_get`.
 - `apps/web` is untouched Precast (sign-in shell + chat demo). PRDForge has no web surface; the human UI is Cowork + Claude Docs. Keep `PRECAST_LOCAL_AGENTS=1` until the import.
@@ -26,9 +26,9 @@ _Known carry-forwards:_ PROGRESS B1–B4. Tool ids use underscores (`run_create`
 
 ## 2. Next task (overwrite on each handoff)
 
-1. **Unblock B1**, then from the repo root: `pnpm connect` (choose the cheapest gateway model), `pnpm db:provision`, `pnpm poc agents`. Expect the boot log line `prdforge ledger ready — 93 Annex A controls seeded`.
-2. **First live calls** in Mastra Studio against `prdforge-ledger`: `run_create` → `ledger_create_sections` → `rubric_slice` → `ledger_write_requirements` with one good and one bad statement (the bad one must come back in `rejected`) → `ledger_render`. Record a `SMOKE-020` result in TEST_CASES.
-3. **Push** (B2) and `precast:deploy`; confirm the AgentBase MCP bridge lists the tools; the Owner adds it as an organisation connector in Claude.
+1. **Confirm the grammar gate** on run `e62b51be-…`: `pnpm smoke:chat` asking the agent to call `ledger_read_section` for `SEC-3.1` (expect `REQ-F-001` only) — then flip SMOKE-020 to full Passing.
+2. **Push** (B2): user creates an empty private GitHub repo `prdforge`, `git remote add origin …`, `git push -u origin develop`.
+3. **`precast:deploy`**: Variables namespace with `DATABASE_URL` and `AGENTBASE_LLM_MODEL=gemini-35-flash-dd840ef8`, Import from Repo, subscribe the Application, confirm the MCP bridge lists the ledger tools; the Owner adds the bridge as an organisation connector in Claude; publish the `prdforge` skill to the Team Workspace; wave-0 spike from Cowork.
 4. **Wave 1 hardening**: write the deferred TEST_CASES rows (tool integration against Postgres, invariant tests, render determinism), then build the B3 stubs in waves 3–4 order.
 
 ---

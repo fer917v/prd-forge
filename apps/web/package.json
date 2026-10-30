@@ -1,0 +1,50 @@
+{
+  "name": "@precast/web",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "pnpm --filter @precast/shared --filter @precast/a2ui build && dotenv -e ../../.env -- next dev -p 45287",
+    "dev:verbose": "pnpm --filter @precast/shared --filter @precast/a2ui build && dotenv -v LOG_LEVEL=debug -e ../../.env -- next dev -p 45287",
+    "build": "next build --webpack",
+    "start": "dotenv -e ../../.env -- next start -p 45287",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:e2e": "playwright test",
+    "test:e2e:install": "playwright install --with-deps chromium",
+    "lint": "eslint .",
+    "typecheck": "tsc --noEmit",
+    "clean": "rm -rf .next dist playwright-report test-results"
+  },
+  "dependencies": {
+    "@a2ui/react": "0.14.0",
+    "@a2ui/web_core": "0.14.0",
+    "@astryxdesign/core": "^0.7.4",
+    "@astryxdesign/theme-neutral": "^0.7.4",
+    "@precast/a2ui": "workspace:*",
+    "@precast/shared": "workspace:*",
+    "better-auth": "^1.7.14",
+    "kysely": "^0.29.7",
+    "next": "^16.4.3",
+    "pg": "^8.23.1",
+    "pino": "^9.14.0",
+    "react": "^19.3.1",
+    "react-dom": "^19.3.1",
+    "zod": "^3.25.76"
+  },
+  "devDependencies": {
+    "@astryxdesign/cli": "^0.7.4",
+    "@playwright/test": "^1.64.1",
+    "@tailwindcss/postcss": "^4.3.3",
+    "@types/node": "^24.19.2",
+    "@types/pg": "^8.23.1",
+    "@types/react": "^19.3.0",
+    "@types/react-dom": "^19.3.0",
+    "eslint": "^10.13.0",
+    "pino-pretty": "^13.2.0",
+    "postcss": "^8.5.32",
+    "tailwindcss": "^4.3.3",
+    "typescript": "^5.9.3",
+    "vitest": "^2.1.9"
+  }
+}

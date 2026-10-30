@@ -1,0 +1,833 @@
+#!/usr/bin/env node
+/**
+ * bootstrap.mjs — Turn Precast into your project in one command.
+ *
+ *   pnpm bootstrap                 # interactive
+ *   pnpm bootstrap my-project      # non-interactive (name as arg)
+ *   pnpm bootstrap my-project --yes# skip the confirmation prompt
+ *
+ * Steps, in order:
+ *   1. Ask for (or read) the project name.
+ *   2. Pick the two apps' ports. By DEFAULT this auto-selects a random, free,
+ *      CONSECUTIVE pair in the 45000–49100 range (agents / web, e.g.
+ *      45000/45001) — see scripts/set-ports.mjs for why that range.
+ *      Consecutive keeps the stack one memorable block; random+free means two
+ *      Precast projects on one machine don't fight over 3000/4111 the way they
+ *      always did. Any port can still be pinned explicitly.
+ *   3. Ask where the agents get their model: the organisation's AgentBase
+ *      gateway (collects the Application credentials + a model name), or skip.
+ *   4. Ask which APC Design System theme the web app should use — Stockholm,
+ *      Prague, Arctic, Nova, or Melbourne (preview them at
+ *      https://apc-design-system.917v.dev). All five share one token
+ *      architecture, so this is a token swap rather than a rewrite; asking here
+ *      is what keeps Precast-derived products looking like one family.
+ *   5. Rename the `precast` placeholder everywhere (scripts/rename-project.mjs).
+ *   6. Apply the chosen ports across env, configs, pnpm scripts, Dockerfiles, docs
+ *      (scripts/set-ports.mjs), and the chosen theme (scripts/set-theme.mjs).
+ *   7. Install + update dependencies to latest compatible (scripts/update-deps.mjs).
+ *   8. Record provenance in precast.lock.json, then remove Precast's own git
+ *      history and re-initialize a BLANK repo on the `develop` branch with a
+ *      single initial commit, hooks activated.
+ *   9. Create a real `.env` from `.env.example` (if one doesn't already exist),
+ *      and print an ACTION-REQUIRED reminder naming the exact env var to set —
+ *      not a vague "go edit .env.example" — so an unconfigured LLM provider
+ *      can't quietly slip past scaffolding unannounced.
+ *
+ * Non-interactive port selection uses equals-form flags (anything not pinned is
+ * still auto-picked from the same free consecutive block):
+ *   pnpm bootstrap my-project --mastra-port=45000 --web-port=45001
+ *   pnpm bootstrap my-project --ports=keep        # keep the committed defaults
+ * Non-interactive LLM provider selection (see LLM_PROVIDERS below for the full
+ * set, or `skip` to decide later):
+ * AgentBase Models non-interactively needs all five:
+ *   pnpm bootstrap my-project --llm-provider=agentbase \
+ *     --agentbase-base-url=… --agentbase-token-url=… --agentbase-client-id=… \
+ *     --agentbase-client-secret=… --agentbase-model=anthropic/claude-sonnet-5
+ *   # The secret may be left for the person to paste into .env themselves:
+ *   pnpm bootstrap my-project --llm-provider=agentbase … --agentbase-client-secret=later
+ * Non-interactive theme selection (defaults to Stockholm when a name is passed
+ * as an argument, since there is nobody at the prompt to answer):
+ *   pnpm bootstrap my-project --theme=arctic
+ *
+ *   # Postgres: ask the database agent on AgentBase for one (needs the AgentBase answers above),
+ *   # paste a URL, or decide later.
+ *   pnpm bootstrap my-project --llm-provider=agentbase … --db=provision
+ *   pnpm bootstrap my-project --db=postgresql://user:pass@host:5432/db
+ *   pnpm bootstrap my-project --db=later
+ *
+ * This is destructive to .git on purpose: a project bootstrapped from Precast
+ * must not inherit Precast's commit history. It runs LAST so a failure earlier
+ * leaves your git history intact.
+ */
+
+import { spawnSync } from 'node:child_process';
+import { existsSync, rmSync, readFileSync, writeFileSync } from 'node:fs';
+import { createInterface } from 'node:readline/promises';
+import { stdin, stdout } from 'node:process';
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { pickConsecutivePorts, PORT_RANGE } from './set-ports.mjs';
+import { stampLock, readManifest } from './precast-lock.mjs';
+import { ensureLocalSecrets, restrictEnvFile } from './local-secrets.mjs';
+import { createPrompt } from './connect-agentbase.mjs';
+import { APC_THEMES, DEFAULT_THEME } from './build-apc-theme.mjs';
+import { THEME_IDS, setTheme } from './set-theme.mjs';
+
+const rootDir = join(dirname(fileURLToPath(import.meta.url)), '..');
+const DEFAULT_BRANCH = 'develop';
+const RESERVED_PORTS = { 5432: 'Postgres', 6379: 'Redis' };
+// Models come from the organisation's AgentBase gateway. There is no vendor-key
+// option: a project holds the Application credentials and a model name.
+const LLM_PROVIDERS = [
+  // Not a vendor key: AgentBase's gateway serves the models your org has
+  // already onboarded, and the real provider key stays server-side. `envVar` is
+  // null because this option needs a SET of values, collected below — so unlike
+  // every other entry there is nothing to remind the user about afterwards.
+  {
+    key: 'agentbase',
+    envVar: null,
+    label: "AgentBase Models (your org's gateway — no vendor key needed)",
+  },
+];
+
+/**
+ * The account-level AgentBase gateway settings, in prompt order.
+ *
+ * Token URL, client id and client secret authenticate you. Base URL and model
+ * are asked for too, and deliberately: without them the gateway cannot be
+ * called at all, so collecting only the credentials would write a config that
+ * looks complete and fails at the first chat — the exact silent-misconfiguration
+ * this scaffold keeps trying to eliminate.
+ */
+const AGENTBASE_LLM_FIELDS = [
+  {
+    env: 'AGENTBASE_URL',
+    flag: 'agentbase-url',
+    prompt: 'AgentBase API base URL (the API, not Studio; e.g. https://agentbase-api.example.com)',
+    secret: false,
+  },
+  {
+    env: 'AGENTBASE_TOKEN_URL',
+    flag: 'agentbase-token-url',
+    prompt: 'AgentBase token endpoint URL (OAuth2 client_credentials)',
+    secret: false,
+  },
+  {
+    env: 'AGENTBASE_CLIENT_ID',
+    flag: 'agentbase-client-id',
+    prompt: 'AgentBase Application client id',
+    secret: false,
+  },
+  {
+    env: 'AGENTBASE_CLIENT_SECRET',
+    flag: 'agentbase-client-secret',
+    prompt: 'AgentBase Application client secret',
+    secret: true,
+  },
+  {
+    env: 'AGENTBASE_LLM_MODEL',
+    flag: 'agentbase-model',
+    prompt: 'Model to use, as onboarded in your org (slug or provider/model)',
+    secret: false,
+  },
+  // Optional since v0.9.10: the gateway base is derived from AGENTBASE_URL and
+  // the model at runtime. A value here overrides that derivation.
+  {
+    env: 'AGENTBASE_LLM_BASE_URL',
+    flag: 'agentbase-base-url',
+    prompt: 'LLM gateway base URL override (optional; blank derives it from the API base)',
+    secret: false,
+    optional: true,
+  },
+];
+
+const rawArgs = process.argv.slice(2);
+const assumeYes = rawArgs.includes('--yes') || rawArgs.includes('-y');
+const skipDeps = rawArgs.includes('--skip-deps');
+const nameArg = rawArgs.find((a) => !a.startsWith('-'));
+
+function flagVal(name) {
+  const pref = `--${name}=`;
+  const hit = rawArgs.find((a) => a.startsWith(pref));
+  return hit ? hit.slice(pref.length) : undefined;
+}
+
+function validatePort(v) {
+  const n = Number(v);
+  if (!Number.isInteger(n) || n < 1 || n > 65535) {
+    return { err: `Ports must be an integer 1–65535 (got "${v}").` };
+  }
+  if (RESERVED_PORTS[n]) return { err: `Port ${n} is used by ${RESERVED_PORTS[n]}. Pick another.` };
+  return { port: n };
+}
+
+function run(cmd, args, { allowFail = false, env } = {}) {
+  console.log(`\n$ ${cmd} ${args.join(' ')}`);
+  const res = spawnSync(cmd, args, {
+    cwd: rootDir,
+    stdio: 'inherit',
+    shell: false,
+    ...(env ? { env: { ...process.env, ...env } } : {}),
+  });
+  if (res.status !== 0 && !allowFail) {
+    console.error(
+      `\n❌ \`${cmd} ${args.join(' ')}\` failed (exit ${res.status}). Bootstrap aborted.`,
+    );
+    process.exit(res.status ?? 1);
+  }
+  return res.status ?? 0;
+}
+
+function validateName(name) {
+  if (!name) return 'A project name is required.';
+  if (!/^[a-z][a-z0-9-]*$/.test(name)) {
+    return `Invalid name "${name}". Use lowercase letters, digits, and hyphens (start with a letter).`;
+  }
+  if (name === 'precast') return 'Pick a name other than "precast".';
+  return null;
+}
+
+async function resolveName() {
+  if (nameArg) {
+    const err = validateName(nameArg);
+    if (err) {
+      console.error(`❌ ${err}`);
+      process.exit(1);
+    }
+    return nameArg;
+  }
+  const rl = createInterface({ input: stdin, output: stdout });
+  try {
+    for (;;) {
+      const answer = (await rl.question('Project name (lowercase, hyphens): ')).trim();
+      const err = validateName(answer);
+      if (!err) return answer;
+      console.error(`  ${err}`);
+    }
+  } finally {
+    rl.close();
+  }
+}
+
+/**
+ * Decide the two apps' ports.
+ *
+ * Default: a random FREE CONSECUTIVE pair in PORT_RANGE (agents / web). Two
+ * Precast projects on one machine used to collide on 3000/4111
+ * every time; a per-project block in the high private range just works, and
+ * being consecutive keeps it memorable.
+ *
+ * Overrides: `--mastra-port` / `--web-port` pin individual
+ * ports (anything unpinned still comes from the auto block); `--ports=keep`
+ * keeps whatever the repo currently ships with. Interactive runs are shown the
+ * auto-picked block and can accept it with Enter.
+ */
+async function resolvePorts() {
+  const pinned = {};
+  for (const [flag, label, key] of [
+    ['mastra-port', 'Mastra', 'mastra'],
+    ['web-port', 'Web', 'web'],
+  ]) {
+    const fv = flagVal(flag);
+    if (fv === undefined) continue;
+    const r = validatePort(fv);
+    if (r.err) {
+      console.error(`❌ ${label} port: ${r.err}`);
+      process.exit(1);
+    }
+    pinned[key] = r.port;
+  }
+
+  if (flagVal('ports') === 'keep') return { keep: true, ...pinned };
+
+  const [mastra, web] = await pickConsecutivePorts();
+  const auto = { mastra, web, ...pinned };
+
+  // Non-interactive (name given as an arg): take the block as-is.
+  if (nameArg) return auto;
+
+  const rl = createInterface({ input: stdin, output: stdout });
+  try {
+    for (;;) {
+      console.log(
+        `\nPorts — auto-picked a free consecutive block in ${PORT_RANGE.min}–${PORT_RANGE.max}:`,
+      );
+      console.log(`  agents ${auto.mastra} · web ${auto.web}`);
+      const answer = (
+        await rl.question('Enter to accept, or type a base port for the block: ')
+      ).trim();
+      if (!answer) return auto;
+      const r = validatePort(answer);
+      if (r.err) {
+        console.error(`  ${r.err}`);
+        continue;
+      }
+      return { mastra: r.port, web: r.port + 1, ...pinned };
+    }
+  } finally {
+    rl.close();
+  }
+}
+
+/**
+ * Ask which LLM provider this project will use. Never collects the actual key
+ * value — only which one, so the final "Next steps" can name one exact env
+ * var instead of a vague "edit .env.example". Non-interactive mode requires
+ * an explicit `--llm-provider=` flag (unlike ports, which fall back to a
+ * default silently) — an unconfigured provider is exactly the gap this
+ * question exists to close, so we don't want a scripted call skipping it
+ * without at least an explicit `skip`.
+ */
+/**
+ * Which APC Design System theme the web app ships with. Asked here rather than
+ * left to chance because it is the one choice that makes every Precast-derived
+ * product look like it belongs to the same family — and because retro-fitting a
+ * look after the UI is built is far more work than picking one now.
+ */
+/**
+ * Collect the account-level AgentBase gateway settings.
+ *
+ * This is the ONE place bootstrap accepts secret values. Every other provider
+ * is recorded by name only, and the closing reminder tells you which key to set
+ * yourself — because a vendor key is a single value that is easy to paste into
+ * `.env`. The AgentBase option is five interdependent values, and a project
+ * that gets four of them right fails at the first chat with an auth error that
+ * points nowhere. Asking here, together, is what makes the option usable.
+ *
+ * The values are written to `.env` only — which is git-ignored and excluded
+ * from the Docker build context. `.env.example`, which IS committed, keeps the
+ * empty placeholders.
+ */
+/**
+ * `--agentbase-client-secret=later` means the person puts the secret into `.env`
+ * themselves after bootstrap, so it never passes through a chat or a command line.
+ * The `AGENTBASE_CLIENT_SECRET=` line `.env.example` ships stays empty for them to
+ * fill, nothing that needs the secret runs (the database is provisioned by
+ * `pnpm db:provision` afterwards), and the closing output says exactly what to do.
+ */
+let secretDeferred = false;
+
+async function resolveAgentBaseLlm(prompt) {
+  const values = {};
+  secretDeferred = (flagVal('agentbase-client-secret') || '').trim().toLowerCase() === 'later';
+
+  // Flags first, so CI / non-interactive runs work without a TTY. The secret may also come
+  // from the environment, which is how the skill passes one pasted into the chat: a flag
+  // would put it on the command line that pnpm prints.
+  for (const field of AGENTBASE_LLM_FIELDS) {
+    const fromFlag = flagVal(field.flag);
+    const fromEnv = field.secret ? process.env[field.env]?.trim() : '';
+    if (fromFlag || fromEnv) values[field.env] = fromFlag || fromEnv;
+  }
+  if (secretDeferred) delete values.AGENTBASE_CLIENT_SECRET;
+
+  const missing = AGENTBASE_LLM_FIELDS.filter(
+    (f) => !f.optional && !values[f.env] && !(secretDeferred && f.secret),
+  );
+  if (missing.length === 0) return values;
+
+  if (!prompt) {
+    const onlySecret = missing.length === 1 && missing[0].secret;
+    console.error(
+      onlySecret
+        ? '\n❌ The AgentBase client secret is typed at a prompt, and this run has no terminal to ' +
+            'show one. Run the same command in your own terminal and type it there.'
+        : `\n❌ --llm-provider=agentbase needs ${missing.map((f) => `--${f.flag}=`).join(' ')}` +
+            ' when running without a terminal.',
+    );
+    process.exit(1);
+  }
+
+  console.log('\nAgentBase Models — create an Application in Studio, subscribe it to the');
+  console.log('model listing, then paste its details here. Stored in .env (git-ignored).');
+  for (const field of missing) {
+    for (;;) {
+      const answer = field.secret
+        ? await prompt.askHidden(`  ${field.prompt} (typed hidden): `)
+        : await prompt.ask(`  ${field.prompt}: `);
+      if (answer) {
+        values[field.env] = answer;
+        break;
+      }
+      console.error('    Required — all five are needed for the gateway to answer.');
+    }
+  }
+  // Optional, so a named run (the skill's) never stops to ask it.
+  const override = AGENTBASE_LLM_FIELDS.find((f) => f.optional);
+  if (override && !values[override.env] && !nameArg) {
+    const answer = await prompt.ask(`  ${override.prompt}: `);
+    if (answer) values[override.env] = answer;
+  }
+  return values;
+}
+
+/**
+ * Postgres for the project. Every Precast project needs one it does not run (ADR-002), and a
+ * placeholder DATABASE_URL passes validation and then fails the first `pnpm poc` healthcheck,
+ * so the question is asked here, not discovered later.
+ *
+ *   --db=provision   the database agent on AgentBase creates one (scripts/provision-db.mjs,
+ *                    through the Application given above); with PRECAST_RDS_SUPERUSER_URL in
+ *                    the shell, Precast creates it on the server directly instead
+ *   --db=<url>       a postgresql:// URL you already have
+ *   --db=later       leave the placeholder; `pnpm db:provision` any time
+ *
+ * Returns { mode, url? }. An admin credential, when the shell has one, reaches the provisioning
+ * script through the inherited environment and is never written into .env.
+ */
+async function resolveDatabase(rl, { connected }) {
+  let choice = flagVal('db');
+  if (!choice && rl) {
+    console.log('\nPostgres for this project:');
+    console.log('  1. Create one now (the database agent on AgentBase makes it)');
+    console.log('  2. Paste a postgresql:// URL you already have');
+    console.log('  3. Later (pnpm db:provision, or edit DATABASE_URL in .env)');
+    for (;;) {
+      const answer = (await rl.question('Choice [1-3]: ')).trim();
+      if (answer === '1') {
+        choice = 'provision';
+        break;
+      }
+      if (answer === '3' || answer === '') {
+        choice = 'later';
+        break;
+      }
+      if (answer === '2') {
+        const url = (await rl.question('  postgresql:// URL: ')).trim();
+        if (/^postgres(ql)?:\/\//.test(url)) {
+          choice = url;
+          break;
+        }
+        console.error('    That is not a postgres:// URL.');
+        continue;
+      }
+      if (/^postgres(ql)?:\/\//.test(answer)) {
+        choice = answer;
+        break;
+      }
+      console.error('    1, 2 or 3.');
+    }
+  }
+  if (!choice || choice === 'later') return { mode: 'later' };
+  if (/^postgres(ql)?:\/\//.test(choice)) return { mode: 'url', url: choice };
+  if (choice !== 'provision') {
+    console.error(`❌ --db must be "provision", "later" or a postgresql:// URL (got "${choice}").`);
+    process.exit(1);
+  }
+
+  const hasAdminUrl = Boolean(
+    process.env.PRECAST_RDS_SUPERUSER_URL || process.env.RDS_SUPERUSER_URL,
+  );
+  if (!connected && !hasAdminUrl) {
+    // The database agent is reached through the AgentBase Application, and there is none yet.
+    console.error(
+      '\n❌ Creating the database needs this project connected to AgentBase: choose AgentBase ' +
+        'for the model (it asks for the Application), or pick "later" and run `pnpm connect`, ' +
+        'then `pnpm db:provision`.',
+    );
+    process.exit(1);
+  }
+  return { mode: 'provision' };
+}
+
+async function resolveApcTheme() {
+  const fv = flagVal('theme');
+  if (fv) {
+    const normalized = fv.toLowerCase();
+    if (!THEME_IDS.includes(normalized)) {
+      console.error(`❌ --theme must be one of: ${THEME_IDS.join(', ')} (got "${fv}").`);
+      process.exit(1);
+    }
+    return normalized;
+  }
+  // Non-interactive (name passed as an arg): keep the shipped default rather
+  // than blocking on a prompt nobody is there to answer.
+  if (nameArg) return DEFAULT_THEME;
+
+  const rl = createInterface({ input: stdin, output: stdout });
+  try {
+    console.log('\nWhich APC Design System theme should the web app use?');
+    console.log('Preview all five: https://apc-design-system.917v.dev');
+    APC_THEMES.forEach((t, i) =>
+      console.log(`  ${i + 1}. ${t.label}${t.id === DEFAULT_THEME ? ' (default)' : ''}`),
+    );
+    for (;;) {
+      const answer = (
+        await rl.question(`Choice [1-${APC_THEMES.length}, or a theme name]: `)
+      ).trim();
+      if (!answer) return DEFAULT_THEME;
+      const n = Number(answer);
+      if (Number.isInteger(n) && n >= 1 && n <= APC_THEMES.length) return APC_THEMES[n - 1].id;
+      const normalized = answer.toLowerCase();
+      if (THEME_IDS.includes(normalized)) return normalized;
+      console.error(`  Enter 1-${APC_THEMES.length}, or a theme name (e.g. arctic).`);
+    }
+  } finally {
+    rl.close();
+  }
+}
+
+async function resolveLlmProvider() {
+  const fv = flagVal('llm-provider');
+  if (nameArg) {
+    if (!fv) return null; // no flag given — proceed, but the closing reminder still warns loudly
+    const normalized = fv.toLowerCase();
+    if (normalized === 'skip') return null;
+    const match = LLM_PROVIDERS.find((p) => p.key === normalized);
+    if (!match) {
+      console.error(
+        `❌ --llm-provider must be one of: ${LLM_PROVIDERS.map((p) => p.key).join(', ')}, skip (got "${fv}").`,
+      );
+      process.exit(1);
+    }
+    return match;
+  }
+  const rl = createInterface({ input: stdin, output: stdout });
+  try {
+    const skipChoice = LLM_PROVIDERS.length + 1;
+    console.log('\nWhere will the agents get their model?');
+    LLM_PROVIDERS.forEach((p, i) => console.log(`  ${i + 1}. ${p.label}`));
+    console.log(`  ${skipChoice}. Skip for now (you'll set it up later)`);
+    for (;;) {
+      const answer = (await rl.question(`Choice [1-${skipChoice}, or a provider name]: `)).trim();
+      const n = Number(answer);
+      if (Number.isInteger(n) && n >= 1 && n <= LLM_PROVIDERS.length) return LLM_PROVIDERS[n - 1];
+      if (n === skipChoice) return null;
+      // Also accept the provider key by name — with this many options, typing
+      // "openrouter" is friendlier than counting rows.
+      const normalized = answer.toLowerCase();
+      if (normalized === 'skip') return null;
+      const byName = LLM_PROVIDERS.find((p) => p.key === normalized);
+      if (byName) return byName;
+      console.error(`  Enter a number 1-${skipChoice}, or "agentbase".`);
+    }
+  } finally {
+    rl.close();
+  }
+}
+
+async function confirm(question) {
+  if (assumeYes) return true;
+  const rl = createInterface({ input: stdin, output: stdout });
+  try {
+    const answer = (await rl.question(`${question} [y/N] `)).trim().toLowerCase();
+    return answer === 'y' || answer === 'yes';
+  } finally {
+    rl.close();
+  }
+}
+
+async function main() {
+  console.log('── Precast bootstrap ────────────────────────────────────────────\n');
+
+  const name = await resolveName();
+  const ports = await resolvePorts();
+  if (!ports.keep && ports.mastra === ports.web) {
+    console.error(`❌ The agents and web ports must differ (got ${ports.mastra} for both).`);
+    process.exit(1);
+  }
+  const llmProvider = await resolveLlmProvider();
+  // Only the AgentBase option needs values rather than a name.
+  let agentBaseLlm = null;
+  if (llmProvider?.key === 'agentbase') {
+    // A passed name means "no questions", except the secret: it is never a flag the skill
+    // types for you, so whenever there is a terminal, ask for it there.
+    const prompt = nameArg && !stdin.isTTY ? null : createPrompt();
+    try {
+      agentBaseLlm = await resolveAgentBaseLlm(prompt);
+    } finally {
+      prompt?.close();
+    }
+  }
+  const apcTheme = await resolveApcTheme();
+  let database;
+  {
+    const rl = nameArg ? null : createInterface({ input: stdin, output: stdout });
+    try {
+      database = await resolveDatabase(rl, { connected: Boolean(agentBaseLlm) });
+    } finally {
+      rl?.close();
+    }
+  }
+  const manifest = readManifest(rootDir);
+
+  console.log(`\nThis will:`);
+  console.log(`  1. Rename the "precast" placeholder → "${name}"`);
+  console.log(
+    ports.keep
+      ? '  2. Keep the current ports'
+      : `  2. Set ports — agents ${ports.mastra}, web ${ports.web}`,
+  );
+  console.log(
+    `  3. Install${skipDeps ? '' : ' + update'} dependencies${skipDeps ? '' : ' to latest compatible'}`,
+  );
+  console.log(
+    `  4. Apply the ${APC_THEMES.find((t) => t.id === apcTheme).label} APC theme + reset progress docs to a clean slate`,
+  );
+  console.log(
+    `  5. Record which Precast this came from in precast.lock.json (so \`pnpm precast:update\` works later)`,
+  );
+  console.log(`  6. DELETE Precast's git history and start a blank repo on "${DEFAULT_BRANCH}"`);
+  console.log(
+    `  7. Create .env from .env.example${llmProvider ? ' (with the AgentBase gateway settings)' : ' (no model chosen yet — you will be reminded)'}`,
+  );
+
+  console.log(
+    database.mode === 'provision'
+      ? '  8. Ask the database agent on AgentBase for a Postgres database and write DATABASE_URL'
+      : database.mode === 'url'
+        ? '  8. Write your Postgres URL into .env as DATABASE_URL'
+        : '  8. Leave DATABASE_URL for later (pnpm db:provision)',
+  );
+
+  if (!(await confirm('\nProceed?'))) {
+    console.log('Aborted — nothing changed.');
+    process.exit(0);
+  }
+
+  // 1. Rename placeholder.
+  run('node', ['scripts/rename-project.mjs', name]);
+
+  // 2. Wire chosen ports through env, configs, pnpm scripts, Dockerfiles, docs.
+  if (!ports.keep) {
+    run('node', ['scripts/set-ports.mjs', `--mastra=${ports.mastra}`, `--web=${ports.web}`]);
+  }
+
+  // 3. Dependencies.
+  if (skipDeps) {
+    run('pnpm', ['install']);
+  } else {
+    run('node', ['scripts/update-deps.mjs', '--no-verify']);
+  }
+
+  // 4. Apply the chosen APC theme, then reset progress memory so the new
+  // project starts with a clean slate.
+  setTheme(apcTheme);
+  resetDocs();
+
+  // 5. Record provenance. MUST run before resetGit — the upstream commit is only
+  // readable while Precast's own .git is still here, and the hashes must be taken
+  // after the rename so they describe this project's files, not the placeholder's.
+  const lock = stampLock(rootDir, { projectName: name, commit: upstreamCommit(), manifest });
+
+  // 6. Reset git history → blank repo on develop.
+  resetGit(name);
+
+  // 7. Create .env from .env.example so there's a real file to edit, not just
+  // an instruction to copy one — this is the gap that let an unconfigured LLM
+  // provider go unnoticed until a chat actually failed.
+  const envCreated = copyEnvFile();
+  if (envCreated) {
+    const minted = ensureLocalSecrets(join(rootDir, '.env'));
+    if (minted.length) console.log(`\nWrote into .env: ${minted.join(', ')}.`);
+  }
+  if (agentBaseLlm) writeEnvValues(agentBaseLlm);
+  if (database.mode === 'url') writeEnvValues({ DATABASE_URL: database.url });
+  if (secretDeferred) {
+    console.log(
+      '\nThe Application client secret is not in .env yet. Open .env, paste the secret after ' +
+        'AGENTBASE_CLIENT_SECRET= and save the file.' +
+        (database.mode === 'provision'
+          ? ' Then run `pnpm db:provision` to create the database, and `pnpm poc`.'
+          : ' Then `pnpm connect --check` confirms it.'),
+    );
+  }
+  if (database.mode === 'provision' && secretDeferred) {
+    console.log('\nSkipped the database for now: creating it needs the secret in .env first.');
+  } else if (database.mode === 'provision') {
+    // 8. Provisioning talks to AgentBase (or the database server) and can fail for
+    // reasons this script cannot fix (network, the agent restarting). The project
+    // exists either way, so a failure here is reported and left to `pnpm db:provision`.
+    const label = flagVal('db-label') || `the ${name} project`;
+    console.log('\n$ node scripts/provision-db.mjs --label …');
+    const res = spawnSync('node', ['scripts/provision-db.mjs', '--label', label], {
+      cwd: rootDir,
+      stdio: 'inherit',
+    });
+    if (res.status !== 0) {
+      console.error(
+        '\n⚠️  The database was not created. The project is set up; run `pnpm db:provision` once the cause above is fixed, ' +
+          'or paste a URL into DATABASE_URL in .env. `pnpm poc` needs one or the other.',
+      );
+    }
+  }
+
+  console.log(`\n✅ ${name} is ready.`);
+  if (lock) {
+    console.log(
+      `   Derived from Precast ${lock.precastVersion}` +
+        (lock.precastCommit ? ` (${lock.precastCommit.slice(0, 7)})` : '') +
+        ` — ${Object.keys(lock.files).length} files tracked for upgrades.`,
+    );
+  }
+  console.log('\nNext steps:');
+  if (secretDeferred) {
+    console.log('  • Paste the Application client secret into .env (AGENTBASE_CLIENT_SECRET=) and save.');
+    if (database.mode === 'provision') console.log('  • Create the database:   pnpm db:provision');
+  }
+  console.log('  • Set your project name + mission in docs/PROGRESS.md §1 and the README title.');
+  if (!envCreated && !existsSync(join(rootDir, '.env'))) {
+    console.log('  • Copy env:            cp .env.example .env');
+  }
+  // PoC first: the fastest route to something the user can look at and react to
+  // (CLAUDE.md §4.9). Full `pnpm test` belongs to the hardening pass, after the
+  // PoC has been reviewed — a green test run on the wrong product is wasted time.
+  console.log('  • See it run:          pnpm poc            (builds both apps and starts them)');
+  console.log('  • Fast check:          pnpm verify:poc     (typecheck only — PoC bar)');
+  console.log('  • Full verify later:   pnpm build && pnpm test && pnpm test:e2e');
+  console.log(
+    '  • Add your remote:     git remote add origin <url> && git push -u origin ' + DEFAULT_BRANCH,
+  );
+  console.log('  • Later, pull Precast improvements in:  pnpm precast:update');
+
+  console.log('');
+  if (llmProvider?.key === 'agentbase') {
+    console.log('✅ AgentBase Models configured — no vendor key needed; the org key stays');
+    console.log('   server-side. Verify with `pnpm poc` and one chat message.');
+  } else {
+    console.log('⚠️  ACTION REQUIRED — no model configured yet. Before the agents will respond,');
+    console.log(
+      '   set AGENTBASE_LLM_MODEL and the Application credentials in .env (AGENTBASE_URL,',
+    );
+    console.log('   AGENTBASE_TOKEN_URL, AGENTBASE_CLIENT_ID, AGENTBASE_CLIENT_SECRET), or rerun');
+    console.log('   pnpm bootstrap --llm-provider=agentbase.');
+  }
+
+  printFeedForwardGuidance();
+}
+
+/**
+ * Create `.env` from `.env.example` if one doesn't already exist. Never
+ * overwrites an existing `.env` (e.g. a re-run, or one already hand-created).
+ * Returns whether it actually created the file.
+ */
+function copyEnvFile() {
+  const envPath = join(rootDir, '.env');
+  const examplePath = join(rootDir, '.env.example');
+  if (existsSync(envPath) || !existsSync(examplePath)) return false;
+  writeFileSync(envPath, readFileSync(examplePath, 'utf-8'), 'utf-8');
+  console.log('\nCreated .env from .env.example.');
+  return true;
+}
+
+/**
+ * Feed-forward docs are the highest-leverage thing to write before building:
+ * they give every agent the same intent up front. Point the user at the
+ * templates so they fill them in first.
+ */
+/**
+ * Secrets that have no reason to be blank, minted locally at scaffold time.
+ *
+ * `AGENT_API_TOKEN` was the gap this closes. `.env.example` ships it empty,
+ * which is correct for a committed file — but the runtime images bake
+ * `NODE_ENV=production`, and an empty token there means the agent API is open,
+ * so the boot guard refuses to start. The result was that `pnpm poc` — the
+ * FIRST thing anyone runs on a new project — failed on a fresh scaffold.
+ *
+ * Generated unconditionally rather than gated on deployment mode. There is no
+ * mode where a local token does harm: on an AgentBase-hosted import the
+ * platform mints its own inbound bearer and injects it, overriding whatever
+ * `.env` holds (docs/INTEGRATION_AGENTBASE.md §7), and local dev/External is
+ * exactly the case that needs one. Gating would mean teaching bootstrap a
+ * deployment-mode concept it does not have, for no gain.
+ *
+ * 32 bytes of CSPRNG, hex-encoded: no shell-quoting or dotenv-parsing hazards,
+ * and long enough that the value is not the weak link.
+ */
+
+/**
+ * Set keys in the real `.env`, replacing the empty placeholders `.env.example`
+ * ships. Never touches `.env.example` — that file is committed, and a secret
+ * landing there would reach every clone.
+ *
+ * Values are written raw and alone on the line: an inline comment after the
+ * value would become PART of it under some dotenv parsers (Docker Compose's did),
+ * which is exactly how a placeholder once shipped as a live "API key" (APP-019).
+ */
+function writeEnvValues(values) {
+  const envPath = join(rootDir, '.env');
+  if (!existsSync(envPath)) return;
+  let text = readFileSync(envPath, 'utf-8');
+
+  for (const [key, value] of Object.entries(values)) {
+    const line = `${key}=${value}`;
+    const re = new RegExp(`^${key}=.*$`, 'm');
+    text = re.test(text) ? text.replace(re, line) : `${text.replace(/\n?$/, '\n')}${line}\n`;
+  }
+
+  writeFileSync(envPath, text, 'utf-8');
+  restrictEnvFile(envPath);
+  console.log(`\nWrote into .env: ${Object.keys(values).join(', ')}.`);
+}
+
+function printFeedForwardGuidance() {
+  console.log('\n📄 Write your feed-forward docs first (templates in templates/):');
+  console.log('   These give any coding agent shared intent before a line of code is written.');
+  console.log('     • templates/PRD.md           — problem, goals, personas, scope, metrics');
+  console.log('     • templates/DATA_MODEL.md     — entities, relationships, invariants');
+  console.log('     • templates/AGENT_SPEC.md     — Mastra agents: job, tools, guardrails');
+  console.log(
+    '     • templates/DESIGN_SYSTEM.md  — UI design language + tokens (Material 3 Expressive example)',
+  );
+  console.log('   Copy the ones you need into docs/, replace the example content, then build.');
+  console.log('   The example content walks a chat-based meeting-room reservation app end to end.');
+}
+
+/**
+ * Wipe any accumulated progress memory so the new project starts clean:
+ * drop the auto-journal file and strip stray <auto-journal> markers from
+ * PROGRESS.md's Session Log. PROGRESS.md/HANDOFF.md ship as empty templates,
+ * so no full rewrite is needed here.
+ */
+function resetDocs() {
+  const journal = join(rootDir, 'docs', '.progress-journal.jsonl');
+  if (existsSync(journal)) rmSync(journal, { force: true });
+
+  const progress = join(rootDir, 'docs', 'PROGRESS.md');
+  if (existsSync(progress)) {
+    const cleaned = readFileSync(progress, 'utf-8')
+      .split('\n')
+      .filter((line) => !line.startsWith('<auto-journal:'))
+      .join('\n');
+    writeFileSync(progress, cleaned, 'utf-8');
+  }
+}
+
+/**
+ * The upstream commit this clone sits on, read while Precast's `.git` is still
+ * present. Returns null for a tarball download or an already-detached copy —
+ * the version in precast.manifest.json is still enough to upgrade from.
+ */
+function upstreamCommit() {
+  const res = spawnSync('git', ['rev-parse', 'HEAD'], { cwd: rootDir, encoding: 'utf-8' });
+  return res.status === 0 ? res.stdout.trim() : null;
+}
+
+function resetGit(name) {
+  const gitDir = join(rootDir, '.git');
+  if (existsSync(gitDir)) {
+    console.log('\nRemoving Precast git history…');
+    rmSync(gitDir, { recursive: true, force: true });
+  }
+  run('git', ['init', '-b', DEFAULT_BRANCH]);
+  run('git', ['config', 'core.hooksPath', '.githooks']);
+  run('git', ['add', '-A']);
+  // `git add -A` stages the required docs, so the doc-contract pre-commit hook
+  // is satisfied on this first commit.
+  // The first commit records the tree exactly as stamped in precast.lock.json.
+  // lint-staged would reformat files after the stamp (so "update it" later calls
+  // them customized) and a single lint error would abort the person's scaffold.
+  run('git', ['commit', '-m', `chore: initialize ${name} from Precast`], {
+    env: { SKIP_LINT_STAGED: '1' },
+  });
+}
+
+/** One line a person can act on; the full error only when asked for. */
+function exitWithReason(err) {
+  console.error(`\n❌ ${err?.message ?? err}`);
+  if (process.env.PRECAST_DEBUG) console.error(err?.stack ?? err);
+  else console.error('   (PRECAST_DEBUG=1 shows the full error.)');
+  process.exit(1);
+}
+
+Promise.resolve().then(main).catch(exitWithReason);

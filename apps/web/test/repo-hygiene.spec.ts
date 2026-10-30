@@ -1,0 +1,667 @@
+import { readFileSync, existsSync, statSync, readdirSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
+import { join, dirname, resolve } from 'node:path';
+import { describe, expect, it } from 'vitest';
+import { replaceToken } from '../../../scripts/rename-project.mjs';
+
+/**
+ * Repo-hygiene fitness guards — SMOKE-001…015 and DOC-001…007.
+ *
+ * These were specified in TEST_CASES.md from the beginning and never implemented:
+ * 22 rows sitting at `Not Started`, more than a quarter of the catalogue, in a
+ * document that otherwise reads as a record of what is covered.
+ *
+ * What they protect is the part of the boilerplate no unit test touches — that
+ * the config files parse, the hooks are executable, the docs still have the
+ * sections the contract references, and `.env.example` carries no real
+ * credential. Every one of these fails silently: a project scaffolded from a
+ * repo with a malformed `turbo.json` or a half-gutted PROGRESS.md looks fine
+ * until someone tries to use it.
+ *
+ * Two of the original specifications could not be implemented as written, and
+ * are noted where they occur rather than quietly dropped (SMOKE-013, DOC-006).
+ */
+const REPO_ROOT = fileURLToPath(new URL('../../..', import.meta.url));
+const read = (rel: string) => readFileSync(join(REPO_ROOT, rel), 'utf8');
+const exists = (rel: string) => existsSync(join(REPO_ROOT, rel));
+
+// ── SMOKE-001 ───────────────────────────────────────────────────────────────
+describe('SMOKE-001 — required files exist', () => {
+  const REQUIRED = [
+    'CLAUDE.md',
+    'README.md',
+    'package.json',
+    'pnpm-workspace.yaml',
+    'turbo.json',
+    'tsconfig.base.json',
+    'eslint.config.js',
+    '.env.example',
+    '.gitignore',
+    '.nvmrc',
+    '.githooks/pre-commit',
+    'docs/HANDOFF.md',
+    'docs/PROGRESS.md',
+    'docs/SPEC.md',
+    'docs/TECH_STACK.md',
+    'docs/ADRS.md',
+    'docs/STYLE_GUIDE.md',
+    'docs/TEST_CASES.md',
+    'docs/SCRIPTS.md',
+    'docs/MIGRATIONS.md',
+  ];
+  it.each(REQUIRED)('%s is present', (rel) => {
+    expect(exists(rel), `${rel} is referenced by the doc contract but missing`).toBe(true);
+  });
+});
+
+// ── SMOKE-002 / 015 ─────────────────────────────────────────────────────────
+describe('SMOKE-002 — root package.json is coherent', () => {
+  const pkg = JSON.parse(read('package.json'));
+
+  it('parses and declares the pinned package manager', () => {
+    expect(pkg.packageManager).toMatch(/^pnpm@\d+\.\d+\.\d+$/);
+  });
+
+  it('pins the Node engine, so a wrong runtime fails at install not at runtime', () => {
+    // .nvmrc is advisory — nothing reads it during `pnpm install`. Without an
+    // engines field, Node 20 installs happily and fails later, confusingly.
+    expect(pkg.engines?.node, 'package.json needs an engines.node range').toBeTruthy();
+    // .nvmrc follows the LTS line (lts/*), so engines is the floor: the oldest LTS
+    // line Prdforge still supports. Newer LTS releases always satisfy it.
+    expect(read('.nvmrc').trim()).toBe('lts/*');
+    expect(pkg.engines.node, 'engines.node is a floor on an LTS (even) major').toMatch(
+      /^>=\s*\d*[02468]$/,
+    );
+  });
+
+  it('every script has a non-empty command', () => {
+    for (const [name, cmd] of Object.entries(pkg.scripts as Record<string, string>)) {
+      expect(typeof cmd === 'string' && cmd.trim().length > 0, `script "${name}" is empty`).toBe(
+        true,
+      );
+    }
+  });
+});
+
+describe('SMOKE-015 — every workspace package.json is valid', () => {
+  const dirs = ['apps/agents', 'apps/web', 'packages/shared', 'packages/a2ui'];
+  it.each(dirs)('%s/package.json parses and is named', (dir) => {
+    const pkg = JSON.parse(read(join(dir, 'package.json')));
+    expect(pkg.name, `${dir} needs a name`).toBeTruthy();
+    // The scope is read from a workspace package rather than written as a
+    // literal: a regex literal here was rewritten by the renamer in every derived
+    // project while the scope itself stayed, so this case failed there.
+    const scope = JSON.parse(read('packages/shared/package.json')).name.split('/')[0];
+    expect(pkg.name.startsWith(`${scope}/`), `${dir} must stay in the ${scope} scope`).toBe(true);
+  });
+});
+
+// ── SMOKE-003 / 004 / 007 / 010 ─────────────────────────────────────────────
+describe('SMOKE-003/004/007/010 — JSON configs parse', () => {
+  // turbo.json and tsconfig.base.json allow comments (JSONC), so strip them
+  // before parsing rather than reporting a false failure.
+  const stripJsonc = (t: string) => t.replace(/^\s*\/\/.*$/gm, '').replace(/\/\*[\s\S]*?\*\//g, '');
+  const FILES = ['tsconfig.base.json', 'turbo.json', '.prettierrc', '.claude/settings.json'];
+  it.each(FILES)('%s is valid JSON', (rel) => {
+    if (rel === '.claude/settings.json' && !exists(rel)) return; // optional, local-only
+    expect(() => JSON.parse(stripJsonc(read(rel))), `${rel} does not parse`).not.toThrow();
+  });
+});
+
+// ── SMOKE-005 ───────────────────────────────────────────────────────────────
+describe('SMOKE-005 — pnpm-workspace.yaml', () => {
+  it('declares the workspace globs the repo actually uses', () => {
+    const text = read('pnpm-workspace.yaml');
+    // Hand-parsed on purpose: adding a YAML dependency to assert one file's
+    // shape would cost more than it protects.
+    expect(text).toMatch(/^packages:/m);
+    expect(text).toMatch(/['"]?apps\/\*/);
+    expect(text).toMatch(/['"]?packages\/\*/);
+    for (const line of text.split('\n')) {
+      expect(line, 'tabs are invalid YAML indentation').not.toMatch(/^\t/);
+    }
+  });
+});
+
+// ── SMOKE-006 ───────────────────────────────────────────────────────────────
+describe('SMOKE-006 — .editorconfig', () => {
+  it('is a valid INI with a root declaration and a wildcard section', () => {
+    const text = read('.editorconfig');
+    expect(text).toMatch(/^root\s*=\s*true/m);
+    expect(text).toMatch(/^\[\*\]/m);
+    for (const line of text.split('\n')) {
+      const t = line.trim();
+      if (!t || t.startsWith('#') || t.startsWith('[')) continue;
+      expect(t, `"${t}" is neither a section, comment, nor key=value`).toMatch(/^[\w_]+\s*=/);
+    }
+  });
+});
+
+// ── SMOKE-008 ───────────────────────────────────────────────────────────────
+describe('SMOKE-008 — .env.example carries no secrets', () => {
+  const lines = read('.env.example')
+    .split('\n')
+    .map((l, i) => ({ n: i + 1, raw: l }))
+    .filter((l) => l.raw.trim() && !l.raw.trim().startsWith('#') && l.raw.includes('='));
+
+  // `admin`/`postgres`/`changeme` are documented local-dev defaults, not
+  // credentials. A guard that cries wolf over them gets ignored, and then it
+  // misses the real thing.
+  const PLACEHOLDER =
+    /^(|<.*>|your[-_].*|change[-_]?me|replace[-_]?me|example|todo|xxx+|admin|postgres|password|dev|local|test)$/i;
+
+  it('every credential-shaped key is empty or an obvious placeholder', () => {
+    const SENSITIVE = /(SECRET|TOKEN|PASSWORD|_KEY|APIKEY|CREDENTIAL)/i;
+    for (const { n, raw } of lines) {
+      const key = raw.slice(0, raw.indexOf('='));
+      const value = raw.slice(raw.indexOf('=') + 1).trim();
+      if (!SENSITIVE.test(key) || !value) continue;
+      const looksPlaceholder =
+        PLACEHOLDER.test(value) ||
+        /example\.com|localhost|127\.0\.0\.1|\bREPLACE\b|\byour\b/i.test(value);
+      expect(
+        looksPlaceholder,
+        `.env.example:${n} — ${key} has a non-placeholder value. This file is COMMITTED.`,
+      ).toBe(true);
+    }
+  });
+
+  it('no value carries a high-entropy token-shaped string', () => {
+    // Catches a pasted real key even under a key name the pattern above misses.
+    for (const { n, raw } of lines) {
+      const value = raw.slice(raw.indexOf('=') + 1).trim();
+      if (!value || /^https?:\/\//.test(value)) continue;
+      const suspicious = /\b(sk-[A-Za-z0-9_-]{16,}|ghp_[A-Za-z0-9]{20,}|AIza[A-Za-z0-9_-]{20,})/;
+      expect(suspicious.test(value), `.env.example:${n} looks like a real credential`).toBe(false);
+    }
+  });
+
+  it('no assignment has a trailing inline comment', () => {
+    // APP-019: `KEY=      # or OTHER_KEY — either works` shipped the COMMENT as
+    // a 48-character value, which failed every LLM call with a ByteString error.
+    // Comments belong above the assignment.
+    for (const { n, raw } of lines) {
+      const value = raw.slice(raw.indexOf('=') + 1);
+      expect(value.includes('#'), `.env.example:${n} — move the comment above the assignment`).toBe(
+        false,
+      );
+    }
+  });
+});
+
+// ── SMOKE-009 ───────────────────────────────────────────────────────────────
+describe('SMOKE-009 — git hooks', () => {
+  it('.githooks/pre-commit is executable', () => {
+    const mode = statSync(join(REPO_ROOT, '.githooks/pre-commit')).mode;
+    expect(
+      (mode & 0o111) !== 0,
+      'pre-commit is not executable — the doc contract silently stops being enforced',
+    ).toBe(true);
+  });
+});
+
+// ── SMOKE-011 ───────────────────────────────────────────────────────────────
+describe('SMOKE-011 — eslint config', () => {
+  it('exports a flat config array covering the framework scripts', () => {
+    const src = read('eslint.config.js');
+    expect(src).toMatch(/export default/);
+    // scripts/*.mjs live outside every workspace package, so `turbo run lint`
+    // never reaches them; the root config is the only thing that does.
+    expect(src).toContain('scripts/**/*.mjs');
+  });
+});
+
+// ── SMOKE-012 ───────────────────────────────────────────────────────────────
+describe('SMOKE-012 — internal doc links resolve', () => {
+  it('every relative .md link points at a file that exists', () => {
+    const roots = [
+      'README.md',
+      'CLAUDE.md',
+      ...readdirSync(join(REPO_ROOT, 'docs')).map((f) => join('docs', f)),
+    ];
+    const broken: string[] = [];
+    for (const rel of roots.filter((r) => r.endsWith('.md'))) {
+      const abs = join(REPO_ROOT, rel);
+      if (!existsSync(abs)) continue;
+      for (const m of read(rel).matchAll(/\]\(([^)#:]+\.md)(#[^)]*)?\)/g)) {
+        if (!existsSync(resolve(dirname(abs), m[1]))) broken.push(`${rel} -> ${m[1]}`);
+      }
+    }
+    expect(broken, `broken internal links:\n${broken.join('\n')}`).toEqual([]);
+  });
+});
+
+// ── SMOKE-013 ───────────────────────────────────────────────────────────────
+describe('SMOKE-013 — PROGRESS freshness marker', () => {
+  /**
+   * The original row specified "HANDOFF.md freshness gate (< 14 days)". That is
+   * not implementable here as written: HANDOFF.md carries no date field, and in
+   * PRDFORGE ITSELF both docs ship as pristine templates that are meant to stay
+   * static — so a live 14-day gate would fail permanently in the repo it is
+   * supposed to protect.
+   *
+   * What is implementable, and is what the gate was actually for: the marker
+   * exists and parses. A derived project can turn the window on with
+   * PRECAST_ENFORCE_DOC_FRESHNESS=1, which is where a stale handoff genuinely
+   * signals lost context.
+   */
+  const stamp = /\*\*Last Updated:\*\*\s*(\d{4}-\d{2}-\d{2})/.exec(read('docs/PROGRESS.md'));
+
+  it('PROGRESS.md carries a parseable Last Updated date', () => {
+    expect(stamp, 'PROGRESS.md must carry `**Last Updated:** YYYY-MM-DD`').not.toBeNull();
+    expect(Number.isNaN(Date.parse(stamp![1]))).toBe(false);
+  });
+
+  it.skipIf(process.env.PRECAST_ENFORCE_DOC_FRESHNESS !== '1')(
+    'PROGRESS.md was updated within 14 days',
+    () => {
+      const age = (Date.now() - Date.parse(stamp![1])) / 86_400_000;
+      expect(age, `PROGRESS.md is ${Math.round(age)} days old`).toBeLessThan(14);
+    },
+  );
+});
+
+// ── SMOKE-014 ───────────────────────────────────────────────────────────────
+describe('SMOKE-014 — PROGRESS.md is structurally intact', () => {
+  it('has no unfilled template markers left in it', () => {
+    const text = read('docs/PROGRESS.md');
+    for (const marker of ['<!-- TODO', 'LOREM IPSUM', 'FIXME:']) {
+      expect(text.includes(marker), `PROGRESS.md still contains ${marker}`).toBe(false);
+    }
+  });
+});
+
+// ── DOC-001 ─────────────────────────────────────────────────────────────────
+describe('DOC-001 — CLAUDE.md references the docs it depends on', () => {
+  const claude = read('CLAUDE.md');
+  const REFERENCED = [
+    'docs/HANDOFF.md',
+    'docs/SPEC.md',
+    'docs/TECH_STACK.md',
+    'docs/PROGRESS.md',
+    'docs/ADRS.md',
+    'docs/STYLE_GUIDE.md',
+    'docs/TEST_CASES.md',
+    'docs/SCRIPTS.md',
+    'docs/MIGRATIONS.md',
+  ];
+  it.each(REFERENCED)('links %s', (doc) => {
+    expect(claude).toContain(doc);
+  });
+});
+
+// ── DOC-002 / 003 / 004 ─────────────────────────────────────────────────────
+describe('DOC-002/003/004 — required doc sections are present', () => {
+  const sections = (rel: string) =>
+    [...read(rel).matchAll(/^##\s+(\d+)\./gm)].map((m) => Number(m[1]));
+
+  it('HANDOFF.md has §1–§4 (the takeover contract)', () => {
+    const s = sections('docs/HANDOFF.md');
+    for (const n of [1, 2, 3, 4]) expect(s, `HANDOFF.md is missing §${n}`).toContain(n);
+  });
+
+  it('PROGRESS.md has §0–§10', () => {
+    const s = sections('docs/PROGRESS.md');
+    for (let n = 0; n <= 10; n++) expect(s, `PROGRESS.md is missing §${n}`).toContain(n);
+  });
+
+  it('TECH_STACK.md covers the facts other docs defer to it for', () => {
+    const t = read('docs/TECH_STACK.md');
+    for (const heading of ['Quick Reference', 'Port Assignments', 'Local Run']) {
+      expect(t, `TECH_STACK.md is missing "${heading}"`).toContain(heading);
+    }
+  });
+});
+
+// ── DOC-005 ─────────────────────────────────────────────────────────────────
+describe('DOC-005 — ADRs are well formed', () => {
+  const adrs = [...read('docs/ADRS.md').matchAll(/^##\s+(ADR-\d{3}):\s*(.+)$/gm)];
+
+  it('every ADR has an id and a title', () => {
+    expect(adrs.length, 'no ADRs found — the heading format may have drifted').toBeGreaterThan(0);
+    for (const [, id, title] of adrs) {
+      expect(title.trim().length, `${id} has no title`).toBeGreaterThan(0);
+    }
+  });
+
+  it('ADR ids are unique and sequential from 000', () => {
+    const ids = adrs.map(([, id]) => Number(id.slice(4)));
+    expect(new Set(ids).size, 'duplicate ADR ids').toBe(ids.length);
+    expect([...ids].sort((a, b) => a - b)).toEqual(Array.from({ length: ids.length }, (_, i) => i));
+  });
+});
+
+// ── DOC-006 ─────────────────────────────────────────────────────────────────
+describe('DOC-006 — STYLE_GUIDE covers the rules other docs enforce', () => {
+  /**
+   * The original row said "covers all required topics" without naming them. The
+   * defensible reading is the topics CLAUDE.md's working rules actually point at
+   * — validation, logging, testing, git — since those are the ones a reviewer
+   * will be sent here to settle. Inventing a longer list would make this test
+   * assert a contract nobody agreed to.
+   */
+  const guide = read('docs/STYLE_GUIDE.md');
+  it.each(['TypeScript', 'Git', 'Validation', 'Logging', 'Error Handling', 'Testing'])(
+    'covers %s',
+    (topic) => {
+      expect(guide).toContain(topic);
+    },
+  );
+});
+
+// ── DOC-007 ─────────────────────────────────────────────────────────────────
+describe('DOC-007 — SCRIPTS.md documents every root script', () => {
+  it('no script is undocumented', () => {
+    const scripts = Object.keys(JSON.parse(read('package.json')).scripts);
+    const doc = read('docs/SCRIPTS.md');
+    // A plain includes() would let `verify` pass on the strength of
+    // `verify:poc` being documented — a prefix must not satisfy the check.
+    const documented = (name: string) =>
+      new RegExp(`pnpm ${name.replace(/[.*+?^${}()|[\\]\\\\]/g, '\\\\$&')}(?![\\w:-])`).test(doc);
+    const missing = scripts.filter((s) => !documented(s));
+    expect(missing, `undocumented scripts: ${missing.join(', ')}`).toEqual([]);
+  });
+});
+
+// ── SMOKE-017 ───────────────────────────────────────────────────────────────
+describe('SMOKE-017 — a fresh scaffold can actually boot', () => {
+  /**
+   * The bug this exists to prevent, in full: `.env.example` ships
+   * `AGENT_API_TOKEN=` (empty), the runtime images bake `NODE_ENV=production`,
+   * and the boot guard refuses to start an unauthenticated agent API. So a
+   * brand-new project failed on `pnpm poc` — the first command anyone runs.
+   *
+   * Nothing caught it because each piece was individually correct. The contract
+   * only breaks when you look at all three together, which is what these
+   * assertions do.
+   */
+  const bootstrap = read('scripts/bootstrap.mjs');
+  const example = read('.env.example');
+
+  const secrets = read('scripts/local-secrets.mjs');
+  const poc = read('scripts/poc.mjs');
+
+  it('the local secrets module mints AGENT_API_TOKEN and BETTER_AUTH_SECRET with a CSPRNG', () => {
+    expect(secrets).toMatch(/AGENT_API_TOKEN:\s*\(\)\s*=>\s*randomBytes\(/);
+    expect(secrets).toMatch(/BETTER_AUTH_SECRET:\s*\(\)\s*=>\s*randomBytes\(/);
+    expect(secrets, 'Math.random is not suitable for a credential').not.toContain('Math.random');
+  });
+
+  it('and both bootstrap and pnpm poc actually CALL it', () => {
+    // Asserting the module exists is not enough: deleting a call site leaves it
+    // in place and the original bug (an empty token, a missing sign-in secret)
+    // returns with a green suite.
+    expect(bootstrap).toMatch(/ensureLocalSecrets\(join\(rootDir, '\.env'\)\)/);
+    expect(poc).toMatch(/ensureLocalSecrets\(join\(rootDir, '\.env'\)\)/);
+  });
+
+  // APP-030: found on a fresh scaffold. lint-staged on bootstrap's first commit
+  // aborted the scaffold over one lint error, and its reformatting made a new
+  // project's untouched files look customized to `precast:update`.
+  // The message's last word is matched loosely: this file is a rename target, and the
+  // boilerplate's name written here was renamed while bootstrap.mjs kept it.
+  it("bootstrap's first commit skips lint-staged", () => {
+    expect(bootstrap).toMatch(
+      /run\('git', \['commit', '-m', `chore: initialize \$\{name\} from [^`]+`\], \{\s*env: \{ SKIP_LINT_STAGED: '1' \},?\s*\}\)/,
+    );
+  });
+
+  // APP-031: the scaffold skill passes the project name, which makes bootstrap ask
+  // nothing. The client secret was then impossible to give except as a flag, so a
+  // run in the person's own terminal stopped. It is asked whenever there is a
+  // terminal, and never echoed (connect-prompt.spec.ts types into a real terminal).
+  it('bootstrap asks for the AgentBase secret, hidden, whenever there is a terminal', () => {
+    expect(bootstrap).toMatch(/nameArg && !stdin\.isTTY \? null : createPrompt\(\)/);
+    expect(bootstrap).toMatch(/field\.secret\s*\?\s*await prompt\.askHidden\(/);
+    // The old trick, overriding rl._writeToOutput, echoes on current Node.
+    expect(bootstrap).not.toMatch(/_writeToOutput/);
+    // A secret pasted into the chat is passed in the environment, never as a flag that
+    // pnpm prints with the command line.
+    expect(bootstrap).toMatch(/field\.secret \? process\.env\[field\.env\]/);
+    expect(read('scripts/connect-agentbase.mjs')).toMatch(/f\.secret \? process\.env\[f\.env\]/);
+  });
+
+  it('.env.example still ships both EMPTY — the committed file must carry no secret', () => {
+    // The two halves are a pair: example stays blank, the module fills it. If
+    // someone "fixes" a boot failure by putting a value in .env.example instead,
+    // every clone would share one token.
+    for (const key of ['AGENT_API_TOKEN', 'BETTER_AUTH_SECRET']) {
+      const line = new RegExp(`^${key}=(.*)$`, 'm').exec(example);
+      expect(line, `.env.example must declare ${key}`).not.toBeNull();
+      expect(line![1].trim(), `.env.example must not carry a real ${key}`).toBe('');
+    }
+  });
+
+  it('every placeholder host in .env.example is an obvious non-address', () => {
+    // A placeholder that looks routable is worse than an empty value: code that
+    // checks truthiness accepts it and fails later at the network. That is
+    // exactly how AGENTBASE_URL slipped past discovery's `!base` check.
+    const hosts = [...example.matchAll(/^([A-Z_]+)=(https?:\/\/[^\s]+)$/gm)];
+    expect(hosts.length).toBeGreaterThan(0);
+    for (const [, key, url] of hosts) {
+      if (/localhost|127\.0\.0\.1/.test(url)) continue;
+      expect(
+        /example\.com|example\.org|your-|REPLACE/i.test(url),
+        `${key}=${url} — a committed placeholder must be recognisably fake, so guards can ` +
+          'detect it and users cannot mistake it for configuration',
+      ).toBe(true);
+    }
+  });
+});
+
+// ── SMOKE-018 ───────────────────────────────────────────────────────────────
+describe('SMOKE-018 — AGENTS.md stays true to the repo', () => {
+  /**
+   * Most non-Claude harnesses look for `AGENTS.md`; only Claude Code reads
+   * `CLAUDE.md`. Without the former, a different agent starts with no
+   * instructions at all — it would not know web→agents is A2A-only, that
+   * Postgres is mandatory, or that a git hook enforces the doc contract.
+   *
+   * A pointer file rots quickly, so this asserts the CLAIMS rather than the
+   * file's existence: every doc it cites must resolve, every command it names
+   * must exist, and every invariant it states must still be stated in
+   * CLAUDE.md. Rename a doc or drop a rule and this fails — which is the point.
+   */
+  const agents = read('AGENTS.md');
+  const claude = read('CLAUDE.md');
+
+  it('points at CLAUDE.md as the full contract', () => {
+    expect(agents).toContain('CLAUDE.md');
+  });
+
+  it('every doc it links to exists', () => {
+    const broken = [...agents.matchAll(/\]\(([^)#:]+\.md)\)/g)]
+      .map((m) => m[1])
+      .filter((rel) => !exists(rel));
+    expect(broken, `AGENTS.md links to missing docs: ${broken.join(', ')}`).toEqual([]);
+  });
+
+  it('every pnpm command it names is a real script', () => {
+    const scripts = Object.keys(JSON.parse(read('package.json')).scripts);
+    const cited = [...new Set([...agents.matchAll(/`pnpm ([a-z:]+)`/g)].map((m) => m[1]))];
+    expect(cited.length, 'AGENTS.md should name the commands an agent needs').toBeGreaterThan(3);
+    const missing = cited.filter((c) => !scripts.includes(c));
+    expect(missing, `AGENTS.md cites commands that do not exist: ${missing.join(', ')}`).toEqual(
+      [],
+    );
+  });
+
+  it('every invariant it states is still stated in CLAUDE.md', () => {
+    // The drift that matters: AGENTS.md keeps asserting a rule after CLAUDE.md
+    // has changed or dropped it. Anchored on the distinctive phrase for each
+    // rule rather than whole sentences, which would break on any rewording.
+    const ANCHORS = [
+      'a2a-only.spec.ts', // web→agents transport guard
+      'SKIP_DOC_CHECK', // the doc-contract bypass
+      'ADR-002', // Postgres-only
+      'console.log', // the logging rule
+      'pnpm poc', // the PoC-first workflow
+    ];
+    for (const anchor of ANCHORS) {
+      if (!agents.includes(anchor)) continue; // AGENTS.md may legitimately drop one
+      expect(
+        claude.includes(anchor),
+        `AGENTS.md states "${anchor}" but CLAUDE.md no longer mentions it — one of the two ` +
+          'has moved on without the other',
+      ).toBe(true);
+    }
+  });
+
+  it('carries no port numbers, which `set-ports` would silently invalidate', () => {
+    // set-ports.mjs rewrites CLAUDE.md, SPEC.md and INTEGRATION_AGENTBASE.md —
+    // not this file. A port printed here would be wrong the moment a project is
+    // scaffolded, and nothing would catch it.
+    expect(
+      /\b4[5-9]\d{3}\b/.test(agents),
+      'AGENTS.md must not hardcode ports — set-ports.mjs does not rewrite it',
+    ).toBe(false);
+  });
+});
+
+// ── SMOKE-019 ───────────────────────────────────────────────────────────────
+describe('SMOKE-019 — the renamer cannot break a code identifier', () => {
+  /**
+   * `pnpm rename` rewrites every case form of the placeholder in the files it
+   * targets (apps/ and packages/ code), which is right for prose, package names
+   * and container names and wrong inside a code identifier: with a hyphenated
+   * project name `getPrdforgeStore` became `getPrdforge-pocStore`, a parse error
+   * on the new project's first commit, and `process.env.PRECAST_ENFORCE_DOC_FRESHNESS`
+   * became a subtraction (both seen live, 2026-10-22). Strings, comments and JSX
+   * text are stripped first; what remains is identifiers, and an identifier the
+   * renamer would change is an offender. The spec detects by running the
+   * renamer, so it carries no literal that the renamer would rewrite in a
+   * derived project.
+   */
+  const stripNonCode = (src: string) =>
+    src
+      .replace(/\/\*[\s\S]*?\*\//g, ' ')
+      .replace(/(^|[^:\\])\/\/.*$/gm, '$1')
+      .replace(/`(?:\\[\s\S]|[^`\\])*`/g, '""')
+      .replace(/'(?:\\.|[^'\\\n])*'/g, '""')
+      .replace(/"(?:\\.|[^"\\\n])*"/g, '""')
+      .replace(/>[^<>{}]+</g, '><');
+
+  const codeFiles = (dir: string): string[] =>
+    readdirSync(join(REPO_ROOT, dir), { withFileTypes: true }).flatMap((d) => {
+      const rel = `${dir}/${d.name}`;
+      if (d.isDirectory()) {
+        return ['node_modules', 'dist', '.next', '.mastra', '.turbo', 'coverage', 'docs'].includes(
+          d.name,
+        )
+          ? []
+          : codeFiles(rel);
+      }
+      return /\.(ts|tsx|mts|mjs|cjs|js)$/.test(d.name) ? [rel] : [];
+    });
+
+  it('finds no identifier under apps/ or packages/ that a hyphenated name would mangle', () => {
+    const offenders: string[] = [];
+    for (const rel of [...codeFiles('apps'), ...codeFiles('packages')]) {
+      const code = stripNonCode(read(rel));
+      for (const m of code.matchAll(/[A-Za-z_$][A-Za-z0-9_$]*/g)) {
+        if (replaceToken(m[0], 'x-y') !== m[0]) offenders.push(`${rel}: ${m[0]}`);
+      }
+    }
+    expect(offenders, 'rename these so a hyphenated project name cannot mangle them').toEqual([]);
+  });
+});
+
+// ── SMOKE-020 ───────────────────────────────────────────────────────────────
+describe('SMOKE-020 — after a rename, every script path a code file names still exists', () => {
+  /**
+   * The renamer rewrites strings too. A spec that imports a script by path
+   * (`scripts/precast-lock.mjs`) must still point at a file after the rename, or
+   * `next build`, which typechecks the specs, fails in the derived project. The
+   * renamer protects the boilerplate's own file names; this proves the set of
+   * protected names is complete for every path actually referenced.
+   */
+  const codeFiles = (dir: string): string[] =>
+    readdirSync(join(REPO_ROOT, dir), { withFileTypes: true }).flatMap((d) => {
+      const rel = `${dir}/${d.name}`;
+      if (d.isDirectory()) {
+        return ['node_modules', 'dist', '.next', '.mastra', '.turbo', 'coverage', 'docs'].includes(
+          d.name,
+        )
+          ? []
+          : codeFiles(rel);
+      }
+      return /\.(ts|tsx|mts|mjs|cjs|js)$/.test(d.name) ? [rel] : [];
+    });
+
+  it('leaves every referenced scripts/*.mjs and root json name unchanged, and the scripts present', () => {
+    const problems: string[] = [];
+    for (const rel of [...codeFiles('apps'), ...codeFiles('packages')]) {
+      const src = read(rel);
+      const refs = new Set<string>();
+      for (const m of src.matchAll(/scripts\/[\w.-]+\.mjs/g)) refs.add(m[0]);
+      for (const m of src.matchAll(/['"`]([\w-]+\.(?:lock|manifest)\.json)['"`]/g)) refs.add(m[1]!);
+      for (const ref of refs) {
+        if (replaceToken(ref, 'x-y') !== ref) problems.push(`${rel} → ${ref} would be renamed`);
+        if (ref.startsWith('scripts/') && !existsSync(join(REPO_ROOT, ref))) {
+          problems.push(`${rel} → ${ref} does not exist`);
+        }
+      }
+    }
+    expect(problems, 'these references break once pnpm rename has run').toEqual([]);
+  });
+});
+
+// ── SMOKE-021 ───────────────────────────────────────────────────────────────
+describe('SMOKE-021 — a workflow job that caches pnpm installs pnpm first', () => {
+  /**
+   * `actions/setup-node` with `cache: pnpm` looks for the pnpm binary and fails
+   * the job when it is not on PATH yet. The deps-image workflow's `tag` job
+   * lacked the `pnpm/action-setup` step, so no dependency image was published
+   * between 2026-08-20 (v0.9.5) and 2026-10-22, and every `pnpm poc` in that
+   * window installed from source. Text-based: each job is the indented block
+   * under `jobs:`, and inside it the setup step must precede the cache option.
+   */
+  const workflows = readdirSync(join(REPO_ROOT, '.github/workflows')).filter((f) =>
+    /\.ya?ml$/.test(f),
+  );
+
+  it.each(workflows)('%s: pnpm/action-setup precedes cache: pnpm in every job', (file) => {
+    const text = read(join('.github/workflows', file));
+    const jobsAt = text.indexOf('\njobs:');
+    if (jobsAt < 0) return;
+    const jobs = text.slice(jobsAt + 6).split(/\n(?= {2}[A-Za-z_-]+:\s*$)/m);
+    for (const job of jobs) {
+      const cacheAt = job.indexOf('cache: pnpm');
+      if (cacheAt < 0) continue;
+      const setupAt = job.indexOf('pnpm/action-setup');
+      expect(
+        setupAt >= 0 && setupAt < cacheAt,
+        `${file}: a job uses cache: pnpm before pnpm/action-setup ran\n${job.slice(0, 200)}`,
+      ).toBe(true);
+    }
+  });
+});
+
+// ── SMOKE-022 ───────────────────────────────────────────────────────────────
+describe('SMOKE-022 — every operator script fails with a sentence, never a stack trace', () => {
+  /**
+   * The plain-language surface promises that whatever a script can say when it
+   * fails is one line a non-engineer can act on. A script whose entry point has
+   * no catch prints Node's stack trace for any unexpected error, which is the
+   * one answer the skills are told never to give. Source-analysed, because the
+   * entry forms differ (several scripts are also imported by others): each must
+   * route its entry through `exitWithReason`, which prints the message and
+   * keeps the stack behind PRECAST_DEBUG=1.
+   */
+  const scripts = readdirSync(join(REPO_ROOT, 'scripts')).filter((f) => f.endsWith('.mjs'));
+  const withMain = scripts.filter((f) =>
+    /^(async )?function main\(/m.test(read(join('scripts', f))),
+  );
+
+  it('finds the scripts that have an entry point', () => {
+    expect(withMain.length).toBeGreaterThan(8);
+  });
+
+  it.each(withMain)('%s catches its entry with exitWithReason', (f) => {
+    const src = read(join('scripts', f));
+    expect(src, `${f} defines main() but does not catch its failure`).toMatch(
+      /\.catch\(exitWithReason\)/,
+    );
+    expect(src, `${f} must keep the stack trace behind PRECAST_DEBUG`).toContain('PRECAST_DEBUG');
+  });
+});

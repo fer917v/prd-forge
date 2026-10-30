@@ -1,0 +1,75 @@
+{
+  "name": "prdforge",
+  "private": true,
+  "type": "module",
+  "packageManager": "pnpm@9.15.9",
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "bootstrap": "node scripts/bootstrap.mjs",
+    "rename": "node scripts/rename-project.mjs",
+    "set-ports": "node scripts/set-ports.mjs",
+    "set-theme": "node scripts/set-theme.mjs",
+    "theme:build": "node scripts/build-apc-theme.mjs",
+    "emit:import-manifest": "node scripts/emit-import-manifest.mjs",
+    "precast:version": "node scripts/precast-lock.mjs",
+    "precast:update": "node scripts/precast-update.mjs",
+    "deps:update": "node scripts/update-deps.mjs",
+    "setup": "pnpm install && pnpm build",
+    "poc": "node scripts/poc.mjs",
+    "verify:poc": "turbo run typecheck",
+    "verify": "turbo run typecheck lint test && eslint scripts",
+    "verify:all": "turbo run typecheck lint test build && pnpm test:e2e",
+    "smoke:chat": "dotenv -e .env -- node scripts/smoke-chat.mjs",
+    "db:provision": "node scripts/provision-db.mjs",
+    "connect": "node scripts/connect-agentbase.mjs",
+    "forget-secret": "node scripts/forget-secret.mjs",
+    "dev": "turbo run dev",
+    "dev:verbose": "turbo run dev:verbose",
+    "dev:agents": "pnpm -F @precast/agents dev",
+    "dev:agents:verbose": "pnpm -F @precast/agents dev:verbose",
+    "dev:web": "pnpm -F @precast/web dev",
+    "dev:web:verbose": "pnpm -F @precast/web dev:verbose",
+    "build": "turbo run build",
+    "build:agents": "pnpm -F @precast/agents build",
+    "build:web": "pnpm -F @precast/web build",
+    "test": "turbo run test",
+    "test:agents": "pnpm -F @precast/agents test",
+    "test:web": "pnpm -F @precast/web test",
+    "test:e2e": "turbo run test:e2e",
+    "lint": "turbo run lint && eslint scripts",
+    "typecheck": "turbo run typecheck",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
+    "clean": "turbo run clean",
+    "stop": "node scripts/poc.mjs --stop",
+    "logs": "node scripts/poc.mjs --logs"
+  },
+  "devDependencies": {
+    "@eslint/js": "^10.0.1",
+    "dotenv-cli": "^11.1.0",
+    "eslint": "^10.13.0",
+    "eslint-config-prettier": "^10.1.8",
+    "lint-staged": "^17.6.0",
+    "pg": "^8.23.1",
+    "prettier": "^3.9.10",
+    "turbo": "^2.11.10",
+    "typescript": "^5.9.3",
+    "typescript-eslint": "^8.72.1"
+  },
+  "engines": {
+    "node": ">=24",
+    "pnpm": ">=9.15.9"
+  },
+  "pnpm": {
+    "overrides": {
+      "hono": ">=4.12.34",
+      "@hono/node-server": ">=1.19.15",
+      "fast-uri": ">=3.1.5",
+      "ip-address": ">=10.3.1",
+      "gray-matter>js-yaml": "^3.15.1"
+    }
+  }
+}

@@ -38,6 +38,12 @@ ENV NODE_ENV=production \
 ENV MASTRA_TELEMETRY_DISABLED=1
 WORKDIR /app
 COPY --from=build --chown=node:node /repo/apps/agents/.mastra/output ./
+# PRDForge: the derived rubrics and the ledger migrations ship with the service and are
+# read at boot (src/mastra/rubrics/load.ts, src/mastra/db/bootstrap.ts).
+COPY --from=build --chown=node:node /repo/rubrics ./rubrics
+COPY --from=build --chown=node:node /repo/apps/agents/drizzle ./drizzle
+ENV PRDFORGE_RUBRICS_DIR=/app/rubrics \
+    PRDFORGE_MIGRATIONS_DIR=/app/drizzle
 # Drop root. `node:lts-alpine` ships an unprivileged `node` user (uid 1000), and
 # nothing here needs more: both ports are above 1024, and the bundle is only
 # read at runtime. Running as root turns any container escape or arbitrary-write

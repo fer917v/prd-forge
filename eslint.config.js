@@ -19,7 +19,12 @@ export default tseslint.config(
     // lint-staged runs eslint on staged files, a missing entry blocks any commit
     // that touches these scripts. `fetch`/`AbortSignal`/`setTimeout` arrived with
     // the v0.4.0+ scripts (poc.mjs and others) and were exactly that.
-    files: ['scripts/**/*.mjs', '*.config.{js,ts,mjs}', '**/*.config.{js,ts,mjs}'],
+    files: [
+      'scripts/**/*.mjs',
+      'apps/*/scripts/**/*.mjs',
+      '*.config.{js,ts,mjs}',
+      '**/*.config.{js,ts,mjs}',
+    ],
     languageOptions: {
       globals: {
         process: 'readonly',

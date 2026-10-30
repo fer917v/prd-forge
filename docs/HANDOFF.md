@@ -12,38 +12,24 @@
 
 ## 1. Current state (overwrite on each handoff)
 
-**Fresh baseline.** This is a clean Precast checkout — a runnable, agent-native monorepo with neutral placeholders (`example-agent` / `summary-agent` / `example-tool`, a generic landing page + agent-chat demo). No domain logic yet. `pnpm build` / `typecheck` / `lint` / `test` are green out of the box.
+**PRDForge — wave 1 skeleton, unbooted.** This project is the `prdforge-ledger` service: the deterministic system of record behind the `prdforge` Claude skill (`docs/PRD.md`, `docs/AGENT_SPEC.md`, `docs/DATA_MODEL.md`, `docs/SKILL.md`, `docs/NEXT_STEPS.md`). One Mastra agent, no reasoning, 29 tools, a Drizzle schema in the `prdforge` Postgres schema, boot-time migrate + Annex A control seed, rubrics shipped in the image.
 
-- The Mastra app (`apps/agents`) and Next app (`apps/web`) are intentionally **neutral placeholders**. Real agents/pages/schema come from the feed-forward docs in `templates/` + TECH_STACK.
-- Infra (Postgres/Redis) is **remote/managed** via the root `.env`, never run on the developer's computer. `pnpm poc` runs both apps as Node processes on `127.0.0.1`; there is no container runtime locally.
-- **Postgres-only** ([ADR-002](ADRS.md), supersedes ADR-001): `DATABASE_URL` rejects SQLite/libsql at boot. A provisioned managed Postgres is a bootstrap precondition — the stack will not start without one.
-- **Agent memory is wired and durable.** `example-agent` carries a `Memory` backed by Postgres (`@mastra/pg`); `summary-agent` deliberately has none (transformation, not conversation). The web app derives `resourceId` (`account-<user id>` from the signed-in session) and a resource-namespaced `threadId` **server-side** in `apps/web/app/lib/agent-context.ts` and never accepts either from the request body. Mastra otherwise defaults `resourceId` to the agent id, which would put every user in one shared memory bucket. Its tables are in `<project>_agents`.
-- **Orchestrator crew — `docs/plans/orchestrator-crew-plan.md` (Phases 1–4 done).** `apps/agents/src/mastra/crew.ts` is the single source of truth for the roster; `defineCrew()` (`lib/crew.ts`) builds an **in-process** orchestrator front door — `crew-orchestrator`, a Mastra Agent Network (agents-as-tools) over the members that routes LLM-decided and **activates only at 2+ members**, collapsing to the sole member at N=1 (no routing hop, no extra card). Each member stays a plain agent → keeps its own `/api/.well-known/:id/agent-card.json` and is independently invocable; the orchestrator is purely additive. `index.ts` registers exactly `crewAgents(crew)`. Guards: reserved orchestrator id, duplicate ids, flat single layer. **P2:** `scripts/emit-import-manifest.mjs` emits an `orchestration` block into `agentbase.import.json` (orchestrator id from `ORCHESTRATOR_ID`; members omitted → discovered; `defaultImport: orchestrator-only`), guarded by `orchestration-manifest.spec.ts`. **P4 R2/R3:** `apps/agents/src/mastra/telemetry/otel.ts` (imported FIRST in `index.ts`) starts an OTel SDK — W3C propagation always, OTLP export when `OTEL_EXPORTER_OTLP_ENDPOINT` is set (AgentBase injects it into hosted containers) — so the crew's in-process hops continue AgentBase's inbound trace and forward it on egress. (P3 + P4 R1/R4/R5 are AgentBase-side.)
+- Green: `pnpm verify:poc`, `pnpm -F @precast/shared test` (28), `pnpm -F @precast/agents test` (152), `pnpm -F @precast/agents build`.
+- **Never booted against Postgres** — the scaffold session could not reach AgentBase (PROGRESS B1), so there is no provisioned database and the model in `.env` is the placeholder `pending-until-connected`.
+- Built tools: run lifecycle, facts, workflow, sections, requirements (grammar pre-check + lineage-stable ids + open questions), revisions (human text protected), narratives, mappings, findings, decisions, slice reads, summary, trace audit, similarity, coverage, snapshot write (unreconciled-read guard), render, approval (hash + blocking-finding checks).
+- Stubs returning `blocked:not_implemented`: `snapshot_diff`, `bundle_compile`, `bundle_verify`, `bundle_get`.
+- `apps/web` is untouched Precast (sign-in shell + chat demo). PRDForge has no web surface; the human UI is Cowork + Claude Docs. Keep `PRECAST_LOCAL_AGENTS=1` until the import.
 
-_Known carry-forwards:_
-
-- Memory has **not been exercised against a live Postgres** — the baseline is verified by typecheck, unit tests, `mastra build`, and runtime env-validation checks only. First run against a real `DATABASE_URL` should confirm Mastra creates its tables in the `mastra` schema and that a second turn recalls the first.
-- The crew's **live A2A cards have not been fetched against a running server.** This checkout's `.env` carries only placeholder DB creds (`your-postgres-host`) plus a pre-existing invalid `file:` `MASTRA_DB_URL` (the repo is Postgres-only, ADR-002), so `mastra start`/`dev` cannot boot here. Phase 1 is verified by typecheck, lint, the 51 agents-package unit tests (8 new in `lib/crew.spec.ts`), and a successful `mastra build` (which constructs the full instance graph including all three agents). First boot against a real Postgres should confirm `/api/.well-known/{example-agent,summary-agent,crew-orchestrator}/agent-card.json` all serve, and that a 2-member prompt routes through `crew-orchestrator`.
-- **Context threading (OBO subject + session) through the orchestrator → member → egress, and W3C `traceparent` propagation, are NOT in Phase 1** — they are Phase 4 (telemetry R1–R5) in the plan. In-process routing works today; the governed-context/telemetry seam is the next correctness-sensitive piece.
-- Sign-in runs inside the web app (Better Auth, `apps/web/app/lib/auth.ts`); chatting needs an account, and agent memory is scoped to `account-<user id>` from the verified session.
+_Known carry-forwards:_ PROGRESS B1–B4. Tool ids use underscores (`run_create`) where the spec writes dots (`run.create`).
 
 ---
 
 ## 2. Next task (overwrite on each handoff)
 
-**Orchestrator-crew Phases 1–4 are DONE** (`docs/plans/orchestrator-crew-plan.md`); the ecosystem is mirrored (precast, precast-plugin `skills/scaffold/SKILL.md`, precast-ground-zero HANDOFF/PROGRESS/ADR-017). Two carry-forwards need a **running stack** to close, and neither is committed yet:
-
-1. **Live-verify the telemetry stitch (P4 R2/R3).** With a real Postgres + a wired OTLP backend, boot a 2-member crew container and confirm the orchestrator→member in-process spans carry AgentBase's inbound `traceparent` and land in the backend correlated with `audit_calls` by trace id. The bundled container likely needs `node --import ./instrumentation.mjs` (ESM instrumentation ordering) — `apps/agents/src/mastra/telemetry/otel.ts` currently self-starts on first import, which covers `mastra dev`; harden the Dockerfile CMD if the live check shows inbound extraction is missed.
-2. **Live-verify the AgentBase Studio import drawer** (full-crew vs orchestrator-only) against an authenticated stack + a repo whose manifest carries `orchestration`.
-
-Deferred (Phase 5, not built): `CREW_ROUTE_VIA_AGENTBASE` per-hop governed routing; Studio "Expose/Hide subagent".
-
-Precast otherwise remains a runnable baseline. To start a real project:
-
-1. `pnpm install && pnpm bootstrap` (or `pnpm bootstrap my-project`).
-2. **Write the feed-forward docs first:** copy the relevant `templates/*.md` into `docs/`, replace the example content with your product.
-3. Fill in `docs/PROGRESS.md` §1 (name + mission) and the README title; run `pnpm connect` for the AgentBase Application and model (it proves them before writing `.env`; no vendor key anywhere), point `REDIS_URL` at your remote/managed Redis, and set `DATABASE_URL` to a **managed Postgres** URL — Postgres-only since [ADR-002](ADRS.md), and the stack will not boot without it (see [.env.example](../.env.example)).
-4. Build your agents/tools under `apps/agents/src/mastra/` and pages under `apps/web/app/`; extend the env schema in `packages/shared/src/env.ts`.
+1. **Unblock B1**, then from the repo root: `pnpm connect` (choose the cheapest gateway model), `pnpm db:provision`, `pnpm poc agents`. Expect the boot log line `prdforge ledger ready — 93 Annex A controls seeded`.
+2. **First live calls** in Mastra Studio against `prdforge-ledger`: `run_create` → `ledger_create_sections` → `rubric_slice` → `ledger_write_requirements` with one good and one bad statement (the bad one must come back in `rejected`) → `ledger_render`. Record a `SMOKE-020` result in TEST_CASES.
+3. **Push** (B2) and `precast:deploy`; confirm the AgentBase MCP bridge lists the tools; the Owner adds it as an organisation connector in Claude.
+4. **Wave 1 hardening**: write the deferred TEST_CASES rows (tool integration against Postgres, invariant tests, render determinism), then build the B3 stubs in waves 3–4 order.
 
 ---
 

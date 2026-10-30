@@ -8,6 +8,7 @@ import { a2uiMiddleware } from './middleware/a2ui';
 import { telemetryMiddleware } from './middleware/telemetry';
 import { crew, crewAgents } from './crew';
 import { isAgentBaseLlmConfigured } from './lib/agentbase-model';
+import { bootstrapLedger } from './db/bootstrap';
 
 // R2 — telemetry first. The production container has already started it from
 // the preload (`node --import ./telemetry.mjs`), which makes this a no-op there;
@@ -38,6 +39,13 @@ if (!isAgentBaseLlmConfigured() && env.AGENTBASE_HOSTED !== '1') {
       'or run pnpm bootstrap --llm-provider=agentbase.',
   );
 }
+
+// The PRDForge ledger owns its schema: migrate + seed the control catalogue before the
+// first tool call (apps/agents/src/mastra/db/bootstrap.ts). Top-level await on purpose —
+// a container whose ledger cannot be reached must not come up looking healthy.
+const ledgerBoot = await bootstrapLedger();
+if (ledgerBoot.migrated)
+  console.warn(`prdforge ledger ready — ${ledgerBoot.controls} Annex A controls seeded`);
 
 // The shared schema allows pino's full range; Mastra's logger supports a
 // subset, so map the two extremes onto the nearest supported level.

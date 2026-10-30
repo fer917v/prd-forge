@@ -95,6 +95,8 @@
 
 ---
 
+| SHR-010 | `packages/shared/src/prdforge/grammar.spec.ts` — the statement grammar pre-check behind `ledger_write_requirements` (AGENT_SPEC T8): accepts the rubric's good examples; rejects wrong modals, vague qualities, two obligations, "support" as a verb, unit-less numbers (while ignoring REQ/A.x.y identifiers and comparators such as "after 5"), bare TBD, and pronoun subjects; `tbdQuestion()` extracts the question. 7 cases | Passing |
+
 ## Agent Tests (Vitest, `apps/agents/src/mastra/`)
 
 > Neutral placeholder — replace with your agents' tests.
@@ -130,6 +132,11 @@
 | AGT-006 | `orchestration-manifest.spec.ts` — the committed `agentbase.import.json` `orchestration` block matches the code: `orchestrator` equals `ORCHESTRATOR_ID`, `members` stays omitted (AgentBase discovers them), `defaultImport` is a supported mode, and the emitter's regex reader resolves the same id the runtime imports (drift guard for `pnpm emit:import-manifest`).                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     | Passing                                            |
 
 ---
+
+| AGT-010 | PRDForge ledger tools — integration against a provisioned Postgres: `run_create` enforces one active run per product; `run_set_state` refuses out-of-machine transitions; `ledger_write_requirements` assigns lineage-stable `REQ-<TYPE>-<nnn>` ids, returns rejected objects with rule ids, and creates an OpenQuestion for `TBD(...)`; `ledger_write_revision` refuses an agent overwrite of human text; `snapshot_write` refuses a render over an unreconciled read; `approval_create` refuses a moved hash or an un-overridden blocking finding; `ledger_render` is deterministic for an unchanged ledger | Not Started (needs a database — PROGRESS B1/B4) |
+| AGT-011 | `rubrics/load.ts` — both YAML files parse, 93 controls across four themes, every `rules` and `notApplicableDefaults` id exists, every `repair.blockingRules` id is a known rule | Not Started |
+| AGT-012 | `db/bootstrap.ts` — migrate + seed is idempotent on a second boot | Not Started (needs a database) |
+| SMOKE-020 | First boot of `prdforge-ledger` against the provisioned database: log line `prdforge ledger ready — 93 Annex A controls seeded`; `run_create` → `ledger_create_sections` → `ledger_write_requirements` (one good, one bad) → `ledger_render` through Studio | Not Started (PROGRESS B1) |
 
 ## Web Tests (Vitest, `apps/web/test/`)
 

@@ -1,6 +1,8 @@
-# Precast
+# prdforge
 
-**The kit for building agents on AgentBase.** A Precast project is a TypeScript monorepo with a Mastra agents app, a Next.js web app on the APC Design System, a Postgres database provisioned for it, and a documentation contract that lets any coding agent pick the work up without losing context. It runs on AgentBase: the organisation's gateway supplies the model, the proxy carries every call, and AgentBase hosts the agents once they are imported.
+**PRDForge ledger service** — the deterministic system of record behind the `prdforge` Claude skill: run state, anchored facts, grammar-checked requirements, ISO/IEC 27001:2022 Annex A coverage, Claude Doc snapshots, approvals and the coding-agent bundle. One Mastra agent (`prdforge-ledger`), no reasoning, hosted on AgentBase. Specs: [docs/PRD.md](docs/PRD.md) · [docs/AGENT_SPEC.md](docs/AGENT_SPEC.md) · [docs/DATA_MODEL.md](docs/DATA_MODEL.md) · [docs/SKILL.md](docs/SKILL.md) · [docs/NEXT_STEPS.md](docs/NEXT_STEPS.md). Rubrics: [rubrics/](rubrics/PROVENANCE.md).
+
+Built on **Precast, the kit for building agents on AgentBase.** A Precast project is a TypeScript monorepo with a Mastra agents app, a Next.js web app on the APC Design System, a Postgres database provisioned for it, and a documentation contract that lets any coding agent pick the work up without losing context. It runs on AgentBase: the organisation's gateway supplies the model, the proxy carries every call, and AgentBase hosts the agents once they are imported.
 
 Most people drive it from Claude Code with the Precast plugin and never type a command: the five phrases below each map to one skill. Engineers get the same five things as `pnpm` scripts. Either way, when something fails the answer is one line with the fix, not a stack trace.
 

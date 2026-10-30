@@ -1,0 +1,738 @@
+# PRDForge control catalogue — ISO/IEC 27001:2022 Annex A (93 controls, 4 themes).
+# 917V-authored paraphrases framed as product-requirement intent. Identifiers only; no standard text.
+# Seeds the `Control` table. `triggers` feed security-mapper F2; `pattern` seeds F4 drafting
+# (always product-specific — the pattern is a shape, never emitted verbatim).
+# relevance: how often the control yields a *product* requirement in a software PRD
+#   high = usually, medium = when a trigger fires, low = organisational/physical; mostly N/A with reason.
+version: 0.1
+standard: 'ISO/IEC 27001:2022 Annex A'
+provenance: see PROVENANCE.md
+
+themes:
+  organizational: 'A.5 — governance, policy, assets, access, suppliers, incidents, continuity, legal'
+  people: 'A.6 — hiring, awareness, duties, remote work, reporting'
+  physical: 'A.7 — premises, equipment, media'
+  technological: 'A.8 — endpoints, access, data, logging, networks, crypto, SDLC'
+
+controls:
+  # ------------------------------------------------------------------ A.5 Organizational (37)
+  - id: A.5.1
+    theme: organizational
+    shortName: Security policies
+    summary: Security rules for the product are written down, approved and reviewed on a cadence.
+    triggers: [always]
+    relevance: low
+    pattern: 'The product team shall maintain a security policy for <product> reviewed at least every 12 months.'
+  - id: A.5.2
+    theme: organizational
+    shortName: Roles and responsibilities
+    summary: Named owners exist for each security duty the product creates (data owner, admin, incident lead).
+    triggers: [admin, pii, always]
+    relevance: medium
+    pattern: 'The system shall record a named owner for each <tenant|dataset> who is accountable for access approvals.'
+  - id: A.5.3
+    theme: organizational
+    shortName: Segregation of duties
+    summary: No single person can both request and approve a sensitive action.
+    triggers: [admin, payment, approval_workflow, finance]
+    relevance: high
+    pattern: 'The system shall prevent the user who initiates a <payment|role change> from approving the same <payment|role change>.'
+  - id: A.5.4
+    theme: organizational
+    shortName: Management responsibilities
+    summary: Management requires staff to follow the security rules relevant to the product.
+    triggers: [always]
+    relevance: low
+    pattern: null
+  - id: A.5.5
+    theme: organizational
+    shortName: Contact with authorities
+    summary: Known channels to regulators and law enforcement (e.g. NPC for PH personal data breaches).
+    triggers: [pii, regulated, payment, telco]
+    relevance: medium
+    pattern: 'The system shall produce a breach notification export containing <fields> within 72 hours of breach confirmation.'
+  - id: A.5.6
+    theme: organizational
+    shortName: Special interest groups
+    summary: Participation in security communities and advisories relevant to the product's stack.
+    triggers: [always]
+    relevance: low
+    pattern: null
+  - id: A.5.7
+    theme: organizational
+    shortName: Threat intelligence
+    summary: Threat information about the product's stack and sector is collected and acted on.
+    triggers: [internet_facing, payment, telco]
+    relevance: low
+    pattern: 'The platform team shall review vendor security advisories for <components> at least weekly.'
+  - id: A.5.8
+    theme: organizational
+    shortName: Security in projects
+    summary: Security is considered in the project from the start — this PRD's security section is the evidence.
+    triggers: [always]
+    relevance: medium
+    pattern: 'The project shall complete a security requirements review before build start, recorded in <artefact>.'
+  - id: A.5.9
+    theme: organizational
+    shortName: Asset inventory
+    summary: Information assets and systems the product creates or depends on are inventoried with owners.
+    triggers: [always]
+    relevance: medium
+    pattern: 'The system shall expose an inventory of <data stores|integrations|environments> with an assigned owner for each.'
+  - id: A.5.10
+    theme: organizational
+    shortName: Acceptable use
+    summary: Rules for how users and staff may use the product's information and systems.
+    triggers: [end_users, internal_tool]
+    relevance: medium
+    pattern: 'The system shall present and record acceptance of the acceptable-use terms before first use.'
+  - id: A.5.11
+    theme: organizational
+    shortName: Return of assets
+    summary: Assets (devices, credentials, data) are returned or revoked when people leave or change roles.
+    triggers: [internal_tool, staff_accounts]
+    relevance: low
+    pattern: 'The system shall revoke all sessions and tokens of a staff account within 1 hour of offboarding.'
+  - id: A.5.12
+    theme: organizational
+    shortName: Information classification
+    summary: Data handled by the product is classified (e.g. public / internal / confidential / restricted) so protection can follow.
+    triggers: [always, pii, confidential]
+    relevance: high
+    pattern: 'The system shall tag every stored <document|record> with a classification level from {<levels>}.'
+  - id: A.5.13
+    theme: organizational
+    shortName: Information labelling
+    summary: Classification is visible on the information (UI labels, headers, export watermarks).
+    triggers: [confidential, exports, documents]
+    relevance: medium
+    pattern: 'The system shall display the classification label on every <screen|export> that shows restricted data.'
+  - id: A.5.14
+    theme: organizational
+    shortName: Information transfer
+    summary: Data moving between parties or systems is protected in transit and governed by agreed rules.
+    triggers: [integration, api, email, file_transfer, external_party]
+    relevance: high
+    pattern: 'The system shall transmit <data> to <party> only over TLS 1.2 or higher with certificate validation.'
+  - id: A.5.15
+    theme: organizational
+    shortName: Access control
+    summary: Rules define who may access what, based on business need and classification.
+    triggers: [always, auth, multi_role]
+    relevance: high
+    pattern: 'The system shall enforce role-based access such that <role> can <actions> and cannot <actions>.'
+  - id: A.5.16
+    theme: organizational
+    shortName: Identity management
+    summary: Each identity (human or service) is unique, owned and has a managed lifecycle.
+    triggers: [auth, service_accounts, api]
+    relevance: high
+    pattern: 'The system shall assign one unique identity per <user|service> and shall reject shared accounts.'
+  - id: A.5.17
+    theme: organizational
+    shortName: Authentication information
+    summary: Secrets (passwords, keys, tokens) are issued, stored and rotated safely.
+    triggers: [auth, api_keys, secrets]
+    relevance: high
+    pattern: 'The system shall store passwords only as salted hashes using <algorithm> and shall rotate API keys at least every 90 days.'
+  - id: A.5.18
+    theme: organizational
+    shortName: Access rights
+    summary: Rights are granted, reviewed and removed through a defined process.
+    triggers: [auth, admin, multi_role]
+    relevance: high
+    pattern: "The system shall support an access review that lists every user's rights and records reviewer decisions at least quarterly."
+  - id: A.5.19
+    theme: organizational
+    shortName: Supplier relationships
+    summary: Risks from suppliers and third-party services the product relies on are managed.
+    triggers: [vendor_api, saas, outsourced]
+    relevance: medium
+    pattern: 'The product shall maintain a register of third-party services with the data each receives.'
+  - id: A.5.20
+    theme: organizational
+    shortName: Supplier agreements
+    summary: Contracts with suppliers state the security obligations relevant to the product's data.
+    triggers: [vendor_api, saas, outsourced, pii]
+    relevance: medium
+    pattern: 'The system shall send personal data to <vendor> only where a data processing agreement is recorded in <register>.'
+  - id: A.5.21
+    theme: organizational
+    shortName: ICT supply chain
+    summary: Security of components and services in the technology supply chain (libraries, cloud, hardware).
+    triggers: [open_source, cloud, hardware]
+    relevance: medium
+    pattern: 'The build pipeline shall generate a software bill of materials for every release.'
+  - id: A.5.22
+    theme: organizational
+    shortName: Supplier service monitoring
+    summary: Supplier services are monitored and changes to them reviewed.
+    triggers: [vendor_api, saas]
+    relevance: low
+    pattern: "The system shall alert <role> when a third-party API's error rate exceeds <n>% over <window>."
+  - id: A.5.23
+    theme: organizational
+    shortName: Cloud services security
+    summary: Acquisition, use, configuration and exit for cloud services are governed.
+    triggers: [cloud, saas, agentbase]
+    relevance: high
+    pattern: 'The system shall store <data> only in cloud regions within <jurisdiction> and shall support export of all tenant data in <format> on exit.'
+  - id: A.5.24
+    theme: organizational
+    shortName: Incident management planning
+    summary: Processes, roles and tooling exist to handle security incidents involving the product.
+    triggers: [always]
+    relevance: medium
+    pattern: 'The system shall provide an incident runbook link and on-call contact in the operations console.'
+  - id: A.5.25
+    theme: organizational
+    shortName: Assessing security events
+    summary: Events are triaged to decide whether they are incidents.
+    triggers: [logging, monitoring]
+    relevance: medium
+    pattern: 'The system shall classify security alerts by severity {<levels>} using <criteria>.'
+  - id: A.5.26
+    theme: organizational
+    shortName: Incident response
+    summary: Incidents are responded to per documented procedures.
+    triggers: [always]
+    relevance: medium
+    pattern: 'The system shall allow <role> to disable a compromised account and invalidate its sessions within 5 minutes.'
+  - id: A.5.27
+    theme: organizational
+    shortName: Learning from incidents
+    summary: Incident lessons feed back into controls.
+    triggers: [always]
+    relevance: low
+    pattern: null
+  - id: A.5.28
+    theme: organizational
+    shortName: Evidence collection
+    summary: Evidence of incidents is captured and preserved in a usable, defensible way.
+    triggers: [logging, regulated, payment]
+    relevance: medium
+    pattern: 'The system shall retain tamper-evident audit logs for <n> months with export in <format>.'
+  - id: A.5.29
+    theme: organizational
+    shortName: Security during disruption
+    summary: Security holds up during outages and crises, not just in normal operation.
+    triggers: [availability, critical_service]
+    relevance: medium
+    pattern: 'When operating in degraded mode, the system shall continue to enforce authentication and authorisation.'
+  - id: A.5.30
+    theme: organizational
+    shortName: ICT continuity readiness
+    summary: Recovery objectives (RTO/RPO) are defined, planned and tested.
+    triggers: [availability, critical_service, data_store]
+    relevance: high
+    pattern: 'The system shall meet a recovery time objective of <n> hours and a recovery point objective of <n> minutes, verified by a restore test every <interval>.'
+  - id: A.5.31
+    theme: organizational
+    shortName: Legal and regulatory requirements
+    summary: Applicable laws, regulations and contracts (e.g. PH Data Privacy Act 2012, BSP circulars, NTC rules) are identified and met.
+    triggers: [pii, payment, telco, regulated, cross_border]
+    relevance: high
+    pattern: 'The system shall obtain and record consent for <processing purpose> in accordance with <regulation> before processing.'
+  - id: A.5.32
+    theme: organizational
+    shortName: Intellectual property
+    summary: Licensed content, software and data are used within their terms.
+    triggers: [open_source, third_party_content, ai_models]
+    relevance: medium
+    pattern: "The build shall fail when a dependency's licence is outside the approved list {<licences>}."
+  - id: A.5.33
+    theme: organizational
+    shortName: Protection of records
+    summary: Records are protected from loss, tampering and unauthorised access for their retention period.
+    triggers: [records, finance, regulated, audit]
+    relevance: high
+    pattern: 'The system shall retain <record type> for <n> years, prevent modification after creation, and restrict access to <roles>.'
+  - id: A.5.34
+    theme: organizational
+    shortName: Privacy and PII
+    summary: Personal data is handled according to privacy law and principles (purpose, minimisation, rights).
+    triggers: [pii]
+    relevance: high
+    pattern: 'The system shall allow a data subject to request access to, correction of, or deletion of their personal data and shall complete the request within <n> days.'
+  - id: A.5.35
+    theme: organizational
+    shortName: Independent security review
+    summary: The product's security is reviewed independently on a cadence or after major change.
+    triggers: [internet_facing, payment, regulated]
+    relevance: medium
+    pattern: 'The product shall undergo an independent penetration test before launch and after every major release.'
+  - id: A.5.36
+    theme: organizational
+    shortName: Compliance with policies
+    summary: Conformance to internal security policies and standards is checked.
+    triggers: [always]
+    relevance: low
+    pattern: "The CI pipeline shall run the organisation's security baseline checks and block merges on failure."
+  - id: A.5.37
+    theme: organizational
+    shortName: Operating procedures
+    summary: Operational tasks for the product are documented.
+    triggers: [operations, admin]
+    relevance: medium
+    pattern: 'The system shall ship runbooks for <deploy|rollback|key rotation|restore> maintained with each release.'
+
+  # ------------------------------------------------------------------ A.6 People (8)
+  - id: A.6.1
+    theme: people
+    shortName: Screening
+    summary: People with access to sensitive product data are vetted proportionately.
+    triggers: [staff_accounts, privileged, pii]
+    relevance: low
+    pattern: null
+  - id: A.6.2
+    theme: people
+    shortName: Employment terms
+    summary: Security responsibilities are in employment and contractor terms.
+    triggers: [staff_accounts, outsourced]
+    relevance: low
+    pattern: null
+  - id: A.6.3
+    theme: people
+    shortName: Awareness and training
+    summary: Users and operators are trained on the product's secure use.
+    triggers: [internal_tool, admin, end_users]
+    relevance: medium
+    pattern: 'The system shall require completion of the <role> security briefing before granting <privileged role>.'
+  - id: A.6.4
+    theme: people
+    shortName: Disciplinary process
+    summary: Consequences exist for security violations.
+    triggers: [always]
+    relevance: low
+    pattern: null
+  - id: A.6.5
+    theme: people
+    shortName: Post-employment duties
+    summary: Obligations (confidentiality, access removal) continue after leaving or changing role.
+    triggers: [staff_accounts]
+    relevance: low
+    pattern: "The system shall remove or re-scope a staff user's access within 24 hours of a role change event from <HR system>."
+  - id: A.6.6
+    theme: people
+    shortName: Confidentiality agreements
+    summary: NDAs cover people and parties exposed to confidential product data.
+    triggers: [confidential, external_party, outsourced]
+    relevance: low
+    pattern: 'The system shall grant external reviewer access only to accounts flagged as NDA-signed in <register>.'
+  - id: A.6.7
+    theme: people
+    shortName: Remote working
+    summary: Working outside the office is secured (device, network, data exposure).
+    triggers: [internal_tool, remote_access, field_staff]
+    relevance: medium
+    pattern: 'The system shall require device compliance attestation before permitting access from outside <network>.'
+  - id: A.6.8
+    theme: people
+    shortName: Security event reporting
+    summary: People can and must report security events quickly through a known channel.
+    triggers: [always, end_users]
+    relevance: medium
+    pattern: "The system shall provide an in-product 'report a security concern' action that creates a ticket in <system> within 1 minute."
+
+  # ------------------------------------------------------------------ A.7 Physical (14)
+  - id: A.7.1
+    theme: physical
+    shortName: Physical perimeters
+    summary: Areas holding sensitive systems or data have defined, protected boundaries.
+    triggers: [on_prem, hardware, data_centre]
+    relevance: low
+    pattern: null
+  - id: A.7.2
+    theme: physical
+    shortName: Physical entry
+    summary: Entry to secure areas is controlled and logged.
+    triggers: [on_prem, hardware, data_centre]
+    relevance: low
+    pattern: null
+  - id: A.7.3
+    theme: physical
+    shortName: Securing facilities
+    summary: Offices and rooms with sensitive assets are physically secured.
+    triggers: [on_prem, hardware]
+    relevance: low
+    pattern: null
+  - id: A.7.4
+    theme: physical
+    shortName: Physical monitoring
+    summary: Secure premises are monitored for unauthorised access.
+    triggers: [on_prem, data_centre]
+    relevance: low
+    pattern: null
+  - id: A.7.5
+    theme: physical
+    shortName: Environmental threats
+    summary: Protection against fire, flood, power and similar hazards (relevant for PH typhoon/flood exposure of on-prem gear).
+    triggers: [on_prem, hardware, edge_devices]
+    relevance: low
+    pattern: 'Edge devices shall operate within <temperature/humidity> ranges and resume automatically after power loss.'
+  - id: A.7.6
+    theme: physical
+    shortName: Working in secure areas
+    summary: Rules for behaviour inside secure areas.
+    triggers: [data_centre]
+    relevance: low
+    pattern: null
+  - id: A.7.7
+    theme: physical
+    shortName: Clear desk and screen
+    summary: Sensitive information is not left visible on desks or screens.
+    triggers: [internal_tool, kiosk, shared_devices]
+    relevance: medium
+    pattern: 'The system shall lock the session and blank sensitive fields after <n> minutes of inactivity.'
+  - id: A.7.8
+    theme: physical
+    shortName: Equipment siting
+    summary: Equipment is placed to reduce environmental and unauthorised-access risk.
+    triggers: [hardware, kiosk, edge_devices]
+    relevance: low
+    pattern: null
+  - id: A.7.9
+    theme: physical
+    shortName: Off-premises assets
+    summary: Devices and media used outside premises are protected.
+    triggers: [field_staff, mobile_devices, edge_devices]
+    relevance: medium
+    pattern: 'The mobile app shall store <data> only in encrypted device storage and shall support remote wipe.'
+  - id: A.7.10
+    theme: physical
+    shortName: Storage media
+    summary: Removable and other media are managed through their lifecycle, including disposal.
+    triggers: [hardware, exports_to_media]
+    relevance: low
+    pattern: null
+  - id: A.7.11
+    theme: physical
+    shortName: Supporting utilities
+    summary: Power, cooling and connectivity failures are guarded against.
+    triggers: [on_prem, data_centre, edge_devices]
+    relevance: low
+    pattern: null
+  - id: A.7.12
+    theme: physical
+    shortName: Cabling security
+    summary: Cables carrying power or data are protected from interference and damage.
+    triggers: [on_prem, data_centre]
+    relevance: low
+    pattern: null
+  - id: A.7.13
+    theme: physical
+    shortName: Equipment maintenance
+    summary: Equipment is maintained to stay available and intact.
+    triggers: [hardware, kiosk, edge_devices]
+    relevance: low
+    pattern: null
+  - id: A.7.14
+    theme: physical
+    shortName: Secure disposal or re-use
+    summary: Data is removed from equipment before disposal or re-use.
+    triggers: [hardware, kiosk, edge_devices]
+    relevance: low
+    pattern: 'Decommissioning a device shall cryptographically erase all stored <data> and record the erasure.'
+
+  # ------------------------------------------------------------------ A.8 Technological (34)
+  - id: A.8.1
+    theme: technological
+    shortName: User endpoint devices
+    summary: Laptops, phones and other endpoints used with the product are protected.
+    triggers: [mobile_app, internal_tool, byod]
+    relevance: medium
+    pattern: 'The mobile app shall refuse to run on rooted or jailbroken devices.'
+  - id: A.8.2
+    theme: technological
+    shortName: Privileged access
+    summary: Admin and other elevated rights are restricted, separate and monitored.
+    triggers: [admin, privileged, operations]
+    relevance: high
+    pattern: 'The system shall require a separate administrator identity with MFA for all privileged actions and shall log each such action.'
+  - id: A.8.3
+    theme: technological
+    shortName: Information access restriction
+    summary: Access to data and functions is restricted to what the access policy allows (object-level, field-level).
+    triggers: [auth, multi_tenant, pii, confidential]
+    relevance: high
+    pattern: "The system shall return only records belonging to the caller's <tenant|account> and shall reject requests for others with HTTP 404."
+  - id: A.8.4
+    theme: technological
+    shortName: Access to source code
+    summary: Source, build tools and libraries are protected from unauthorised change and disclosure.
+    triggers: [always]
+    relevance: medium
+    pattern: 'The repository shall require signed commits and review approval from <n> maintainers before merge to the release branch.'
+  - id: A.8.5
+    theme: technological
+    shortName: Secure authentication
+    summary: Authentication strength matches the sensitivity of what it protects (MFA, rate limits, no credential leakage).
+    triggers: [auth, pii, payment, admin]
+    relevance: high
+    pattern: 'The system shall require multi-factor authentication for <roles|actions> and shall lock an account after <n> failed attempts within <window>.'
+  - id: A.8.6
+    theme: technological
+    shortName: Capacity management
+    summary: Resource use is monitored and capacity planned so availability holds.
+    triggers: [availability, scale, batch_jobs]
+    relevance: medium
+    pattern: 'The system shall alert <role> when <resource> utilisation exceeds <n>% for <duration>.'
+  - id: A.8.7
+    theme: technological
+    shortName: Malware protection
+    summary: Malware is detected and prevented, including in user uploads.
+    triggers: [file_upload, endpoints, email]
+    relevance: high
+    pattern: 'The system shall scan every uploaded file for malware and shall quarantine detections before they are accessible to any user.'
+  - id: A.8.8
+    theme: technological
+    shortName: Technical vulnerabilities
+    summary: Vulnerabilities in the product's components are found and fixed within defined times.
+    triggers: [always]
+    relevance: high
+    pattern: 'The pipeline shall block releases containing dependencies with critical CVEs, and critical vulnerabilities in production shall be patched within <n> days.'
+  - id: A.8.9
+    theme: technological
+    shortName: Configuration management
+    summary: Secure configurations are defined, applied and drift is detected.
+    triggers: [always, cloud]
+    relevance: high
+    pattern: 'All environments shall be provisioned from version-controlled infrastructure definitions, and configuration drift shall be reported within <interval>.'
+  - id: A.8.10
+    theme: technological
+    shortName: Information deletion
+    summary: Data is deleted when no longer needed, including from backups and third parties, verifiably.
+    triggers: [pii, retention, confidential]
+    relevance: high
+    pattern: 'The system shall permanently delete <data class> <n> days after <trigger event> and shall record the deletion in the audit log.'
+  - id: A.8.11
+    theme: technological
+    shortName: Data masking
+    summary: Sensitive data is masked, pseudonymised or tokenised where the full value is not needed.
+    triggers: [pii, payment, non_prod_data, analytics]
+    relevance: high
+    pattern: 'The system shall display only the last 4 digits of <identifier> to <roles> and shall pseudonymise personal data in analytics exports.'
+  - id: A.8.12
+    theme: technological
+    shortName: Data leakage prevention
+    summary: Unauthorised disclosure or exfiltration of sensitive data is detected and prevented.
+    triggers: [confidential, exports, pii, ai_models]
+    relevance: high
+    pattern: 'The system shall restrict bulk export of <data> to <roles>, cap exports at <n> records, and alert on exports exceeding <threshold>.'
+  - id: A.8.13
+    theme: technological
+    shortName: Information backup
+    summary: Backups exist, are protected and are restore-tested.
+    triggers: [data_store, availability]
+    relevance: high
+    pattern: 'The system shall back up <data store> at least every <interval>, encrypt backups, and verify restorability every <interval>.'
+  - id: A.8.14
+    theme: technological
+    shortName: Redundancy
+    summary: Processing facilities are redundant enough to meet availability targets.
+    triggers: [availability, critical_service]
+    relevance: medium
+    pattern: 'The system shall run across at least <n> availability zones and shall tolerate loss of one without user-visible outage.'
+  - id: A.8.15
+    theme: technological
+    shortName: Logging
+    summary: Security-relevant events are logged with enough detail, protected and retained.
+    triggers: [always]
+    relevance: high
+    pattern: 'The system shall log <authentication events|privileged actions|data access to restricted records> with actor, timestamp, source and outcome, protected from modification, retained <n> months.'
+  - id: A.8.16
+    theme: technological
+    shortName: Monitoring
+    summary: Systems are monitored for anomalous behaviour and alerts are acted on.
+    triggers: [internet_facing, always]
+    relevance: high
+    pattern: 'The system shall raise an alert to <channel> within <n> minutes when <anomaly, e.g. >50 failed logins from one IP>.'
+  - id: A.8.17
+    theme: technological
+    shortName: Clock synchronisation
+    summary: System clocks are synchronised to a trusted source so logs and events correlate.
+    triggers: [logging, distributed, audit]
+    relevance: medium
+    pattern: 'All services shall synchronise time to <NTP source> and log timestamps in UTC with millisecond precision.'
+  - id: A.8.18
+    theme: technological
+    shortName: Privileged utilities
+    summary: Tools that can bypass controls (DB consoles, debuggers, admin CLIs) are tightly restricted.
+    triggers: [operations, admin, data_store]
+    relevance: medium
+    pattern: 'Direct production database access shall be limited to <roles>, require a ticket reference, and be session-recorded.'
+  - id: A.8.19
+    theme: technological
+    shortName: Software installation on operational systems
+    summary: Only approved, controlled software changes reach production.
+    triggers: [always]
+    relevance: medium
+    pattern: 'Production deployments shall originate only from the CI pipeline using signed artefacts.'
+  - id: A.8.20
+    theme: technological
+    shortName: Network security
+    summary: Networks and network devices are secured and managed.
+    triggers: [internet_facing, cloud, on_prem]
+    relevance: medium
+    pattern: 'The system shall expose only ports <list> to the internet and shall place data stores in private subnets.'
+  - id: A.8.21
+    theme: technological
+    shortName: Security of network services
+    summary: Security features and service levels of network services are identified and enforced.
+    triggers: [cdn, api_gateway, vpn, telco]
+    relevance: medium
+    pattern: 'Public endpoints shall sit behind <WAF/API gateway> with rate limiting of <n> requests per <window> per client.'
+  - id: A.8.22
+    theme: technological
+    shortName: Network segregation
+    summary: Networks are segmented by trust level and function.
+    triggers: [cloud, on_prem, multi_tenant, iot]
+    relevance: medium
+    pattern: 'Production, staging and management networks shall be segregated with no direct routing between them.'
+  - id: A.8.23
+    theme: technological
+    shortName: Web filtering
+    summary: Access to malicious or inappropriate external websites is managed.
+    triggers: [endpoints, outbound_fetch, ai_agents]
+    relevance: medium
+    pattern: 'Server-side fetches of user-supplied URLs shall be restricted to an allow-list and shall block private address ranges.'
+  - id: A.8.24
+    theme: technological
+    shortName: Cryptography
+    summary: Cryptography (algorithms, keys, certificates) is used and managed correctly.
+    triggers: [pii, payment, confidential, integration, secrets]
+    relevance: high
+    pattern: 'The system shall encrypt <data> at rest with <algorithm/key length>, manage keys in <KMS> with rotation every <n> days, and use TLS 1.2+ in transit.'
+  - id: A.8.25
+    theme: technological
+    shortName: Secure development lifecycle
+    summary: Security activities are built into how the product is designed, built and released.
+    triggers: [software]
+    relevance: high
+    pattern: 'The delivery process shall include threat modelling at design, SAST/dependency scanning per commit, and a security sign-off per release.'
+  - id: A.8.26
+    theme: technological
+    shortName: Application security requirements
+    summary: Security requirements are specified for the application — this section is the evidence.
+    triggers: [software]
+    relevance: high
+    pattern: 'Each release shall demonstrate traceability from every SEC requirement in this PRD to a verification result.'
+  - id: A.8.27
+    theme: technological
+    shortName: Secure architecture principles
+    summary: Defence in depth, least privilege, fail-secure and similar principles shape the design.
+    triggers: [software]
+    relevance: high
+    pattern: 'When an authorisation decision cannot be evaluated, the system shall deny the request (fail closed).'
+  - id: A.8.28
+    theme: technological
+    shortName: Secure coding
+    summary: Code is written to avoid common vulnerability classes.
+    triggers: [software]
+    relevance: high
+    pattern: 'The system shall validate and encode all external input such that OWASP Top 10 injection classes are prevented, verified by automated tests.'
+  - id: A.8.29
+    theme: technological
+    shortName: Security testing
+    summary: Security is tested during development and before acceptance.
+    triggers: [software]
+    relevance: high
+    pattern: 'Each release candidate shall pass DAST against <environment> with zero high findings before promotion.'
+  - id: A.8.30
+    theme: technological
+    shortName: Outsourced development
+    summary: Security requirements apply to development done by third parties.
+    triggers: [outsourced, agency, third_party_dev]
+    relevance: medium
+    pattern: 'Deliverables from <vendor> shall pass the same pipeline gates as internal code before merge.'
+  - id: A.8.31
+    theme: technological
+    shortName: Environment separation
+    summary: Development, test and production are separated and protected from each other.
+    triggers: [software]
+    relevance: high
+    pattern: 'Production data and credentials shall not be present in development or test environments.'
+  - id: A.8.32
+    theme: technological
+    shortName: Change management
+    summary: Changes to systems are controlled, reviewed and traceable.
+    triggers: [always]
+    relevance: high
+    pattern: 'Every production change shall be traceable to an approved change record and shall be reversible by an automated rollback.'
+  - id: A.8.33
+    theme: technological
+    shortName: Test information
+    summary: Test data is chosen and protected appropriately (no live PII in test).
+    triggers: [software, pii]
+    relevance: high
+    pattern: 'Test environments shall use synthetic or pseudonymised data generated by <tool>; copying production personal data is prohibited.'
+  - id: A.8.34
+    theme: technological
+    shortName: Protection during audit testing
+    summary: Audits and assurance tests do not disrupt or expose production systems.
+    triggers: [regulated, audit]
+    relevance: low
+    pattern: 'Audit read access shall be provided through a read-only replica with access logged.'
+
+# Deterministic applicability rules (security-mapper F2). Profile tags → controls that are at least `supports`-applicable.
+rules:
+  software:
+    [
+      A.8.25,
+      A.8.26,
+      A.8.27,
+      A.8.28,
+      A.8.29,
+      A.8.31,
+      A.8.32,
+      A.8.33,
+      A.8.4,
+      A.8.8,
+      A.8.9,
+      A.8.15,
+      A.8.16,
+      A.8.19,
+    ]
+  always: [A.5.8, A.5.9, A.5.12, A.5.15, A.5.24, A.5.26, A.6.8, A.8.15, A.8.16, A.8.32]
+  pii: [A.5.5, A.5.12, A.5.31, A.5.34, A.8.3, A.8.5, A.8.10, A.8.11, A.8.12, A.8.24, A.8.33, A.5.20]
+  payment: [A.5.3, A.5.31, A.5.33, A.8.5, A.8.11, A.8.24, A.5.35]
+  auth: [A.5.15, A.5.16, A.5.17, A.5.18, A.8.3, A.8.5]
+  admin: [A.5.3, A.5.18, A.8.2, A.8.18, A.6.3]
+  integration: [A.5.14, A.5.19, A.5.20, A.5.22, A.8.24]
+  vendor_api: [A.5.19, A.5.20, A.5.21, A.5.22]
+  cloud: [A.5.23, A.8.9, A.8.20, A.8.22]
+  data_store: [A.5.30, A.8.13, A.8.18]
+  availability: [A.5.29, A.5.30, A.8.6, A.8.13, A.8.14]
+  file_upload: [A.8.7, A.8.12]
+  internet_facing: [A.5.7, A.5.35, A.8.16, A.8.20, A.8.21]
+  multi_tenant: [A.8.3, A.8.22]
+  confidential: [A.5.12, A.5.13, A.6.6, A.8.12]
+  exports: [A.5.13, A.8.12, A.8.11]
+  mobile_app: [A.7.9, A.8.1]
+  internal_tool: [A.5.10, A.5.11, A.6.3, A.6.7, A.7.7]
+  ai_agents: [A.5.32, A.8.12, A.8.23, A.5.23]
+  on_prem: [A.7.1, A.7.2, A.7.3, A.7.4, A.7.5, A.7.11, A.7.12, A.8.20]
+  edge_devices: [A.7.5, A.7.8, A.7.9, A.7.13, A.7.14]
+  outsourced: [A.5.19, A.5.20, A.6.2, A.6.6, A.8.30]
+  regulated: [A.5.5, A.5.31, A.5.33, A.5.35, A.8.34]
+  telco: [A.5.5, A.5.7, A.5.31, A.8.21]
+  records: [A.5.33, A.8.10]
+  logging: [A.5.25, A.5.28, A.8.15, A.8.17]
+notApplicableDefaults:
+  # Controls the mapper may mark not_applicable with the stated reason when none of their triggers fire.
+  - {
+      id: A.7.1,
+      reason: 'No on-premises or physical infrastructure in scope; hosting provider controls apply.',
+    }
+  - { id: A.7.2, reason: 'As A.7.1.' }
+  - { id: A.7.3, reason: 'As A.7.1.' }
+  - { id: A.7.4, reason: 'As A.7.1.' }
+  - { id: A.7.6, reason: 'As A.7.1.' }
+  - { id: A.7.8, reason: 'No product-owned hardware.' }
+  - { id: A.7.10, reason: 'No removable media in product workflows.' }
+  - { id: A.7.11, reason: 'As A.7.1.' }
+  - { id: A.7.12, reason: 'As A.7.1.' }
+  - { id: A.7.13, reason: 'No product-owned hardware.' }
+  - { id: A.6.1, reason: 'Staffing control owned by HR; no product requirement derivable.' }
+  - { id: A.6.2, reason: 'As A.6.1.' }
+  - { id: A.6.4, reason: 'As A.6.1.' }

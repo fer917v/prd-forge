@@ -1,0 +1,312 @@
+# PRDForge rubric — derived from IEEE/ISO/IEC 29148:2018 concepts.
+# 917V-authored paraphrase. Cites clause identifiers only; contains no standard text.
+# Consumed by rubric.slice (sectionKind, reqTypes) → rules[].
+version: 0.1
+standard: 'ISO/IEC/IEEE 29148:2018'
+provenance: see PROVENANCE.md
+
+# ---------------------------------------------------------------------------
+# A. Outline — Section.kind values and drafting order (dependency order).
+# `mandatory` applies to software products; `appliesWhen` narrows optional ones.
+# ---------------------------------------------------------------------------
+outline:
+  - id: SEC-1.1
+    kind: purpose
+    title: Purpose
+    order: 1
+    mandatory: true
+    guidance: One paragraph. What the PRD specifies and for whom. No requirements here.
+    maxWords: 150
+  - id: SEC-1.2
+    kind: scope
+    title: Scope
+    order: 2
+    mandatory: true
+    guidance: Name the product, what it does and does not do, benefits and objectives. Explicit out-of-scope list.
+    maxWords: 300
+  - id: SEC-1.3
+    kind: overview
+    title: Product overview
+    order: 3
+    mandatory: true
+    guidance: >-
+      Four sub-blocks: perspective (where it sits among other systems, interfaces, boundaries),
+      functions (headline capabilities, one line each), user characteristics (personas, skill,
+      access level), limitations (regulatory, hardware, policy, environment).
+    maxWords: 400
+  - id: SEC-1.4
+    kind: definitions
+    title: Definitions and glossary
+    order: 4
+    mandatory: true
+    guidance: Every defined term used in any requirement statement. Source from PrdRun.glossary.
+  - id: SEC-2
+    kind: references
+    title: References
+    order: 5
+    mandatory: true
+    guidance: Source documents (brief, diagrams with Drive IDs and revisions), standards cited by identifier.
+  - id: SEC-3.1
+    kind: functional
+    title: Functional requirements
+    order: 6
+    mandatory: true
+    reqTypes: [F]
+    guidance: Derived from goals, journeys and WorkflowModel steps. Group by flow. Every step maps to ≥1 requirement or an out-of-scope note.
+  - id: SEC-3.4
+    kind: interface
+    title: External interface requirements
+    order: 7
+    mandatory: true
+    reqTypes: [IF]
+    guidance: Sub-blocks — user, hardware, software (APIs, integrations), communications (protocols, formats). Each integration from facts appears here.
+  - id: SEC-3.5
+    kind: data
+    title: Logical data requirements
+    order: 8
+    mandatory: true
+    reqTypes: [DATA]
+    guidance: Entities, key attributes, retention, classification, volumes. Feeds DATA_MODEL.md draft.
+  - id: SEC-3.2
+    kind: performance
+    title: Performance requirements
+    order: 9
+    mandatory: true
+    reqTypes: [PERF]
+    guidance: Static (capacity, concurrency) and dynamic (latency, throughput) with numbers and units. TBD(question) if the brief is silent.
+  - id: SEC-3.3
+    kind: usability
+    title: Usability requirements
+    order: 10
+    mandatory: false
+    appliesWhen: product has a human user interface
+    reqTypes: [USE]
+    guidance: Measurable effectiveness, efficiency, satisfaction, accessibility targets.
+  - id: SEC-3.6
+    kind: constraints
+    title: Design and implementation constraints
+    order: 11
+    mandatory: true
+    reqTypes: [CONSTR]
+    guidance: Mandated platforms, languages, standards, hosting (e.g. AgentBase), regulatory constraints.
+  - id: SEC-3.7
+    kind: attributes
+    title: Software system attributes
+    order: 12
+    mandatory: true
+    reqTypes: [QUAL]
+    guidance: Reliability, availability, maintainability, portability — each measurable. Security is its own section.
+  - id: SEC-3.8
+    kind: security
+    title: Security and privacy requirements
+    order: 13
+    mandatory: true
+    reqTypes: [SEC]
+    guidance: Written/augmented by security-mapper. Every requirement cites ≥1 Annex A control in `source` or `controls`.
+  - id: SEC-4
+    kind: verification
+    title: Verification
+    order: 14
+    mandatory: true
+    guidance: Table of requirement → verification method → acceptance evidence. Generated from Requirement.verification; no new requirements.
+  - id: SEC-5.1
+    kind: assumptions
+    title: Assumptions and dependencies
+    order: 15
+    mandatory: true
+    guidance: From BriefFact(kind=assumption) and anything inferred during drafting; each one dated and owned.
+  - id: SEC-5.2
+    kind: open_questions
+    title: Open questions
+    order: 16
+    mandatory: true
+    guidance: All OpenQuestion rows with the REQ/SEC IDs they block.
+  - id: SEC-5.3
+    kind: coverage
+    title: ISO/IEC 27001:2022 Annex A coverage matrix
+    order: 17
+    mandatory: true
+    guidance: ControlStatus per applicable control; not_applicable always with reason.
+  - id: SEC-5.4
+    kind: traceability
+    title: Traceability
+    order: 18
+    mandatory: true
+    guidance: REQ → sources → controls → verification.
+
+# ---------------------------------------------------------------------------
+# B. Requirement attributes — all mandatory unless noted.
+# ---------------------------------------------------------------------------
+attributes:
+  - { name: id, rule: 'REQ-<TYPE>-<nnn>; immutable; never reused' }
+  - { name: statement, rule: 'conforms to grammar below' }
+  - { name: type, rule: 'one of F, IF, DATA, PERF, USE, SEC, CONSTR, QUAL' }
+  - { name: rationale, rule: 'why it exists, in one or two sentences; not a restatement' }
+  - { name: source, rule: '≥1 anchor | fact | workflow step | derived(control, why)' }
+  - { name: priority, rule: 'must | should | could | wont' }
+  - { name: verification, rule: 'inspection | analysis | demonstration | test' }
+  - { name: stability, rule: 'stable | volatile | tbd' }
+  - { name: stakeholders, rule: '≥1 persona or role from SEC-1.3', optional: true }
+  - { name: dependsOn, rule: 'REQ IDs this one presupposes', optional: true }
+
+verificationMethods:
+  inspection: 'Visual/document examination of the artefact (code, config, document).'
+  analysis: 'Reasoning, modelling or calculation over design data without executing.'
+  demonstration: 'Operating the system to show behaviour qualitatively, no instrumentation.'
+  test: 'Executing with defined inputs and measuring outputs against defined criteria.'
+  selectionHint: 'Numeric constraint → test. Presence of a control/config → inspection. Capacity/latency projection pre-build → analysis. Journey works end to end → demonstration.'
+
+# ---------------------------------------------------------------------------
+# C. Statement grammar — enforced pre-write by ledger.writeRequirements.
+# ---------------------------------------------------------------------------
+grammar:
+  pattern: '[When|While|If <condition>,] <subject> shall <single action verb> <object> [<measurable constraint>]'
+  subjectRule: "The system or a named component/actor from the glossary. Never 'it', 'the solution', 'we'."
+  modal:
+    required: shall
+    forbidden: [will, should, must, may, can, could] # 'should/could' belong in priority, not the statement
+  oneVerb: true
+  bannedTerms:
+    vagueness:
+      [
+        'appropriate',
+        'adequate',
+        'sufficient',
+        'user-friendly',
+        'intuitive',
+        'fast',
+        'quick',
+        'robust',
+        'flexible',
+        'seamless',
+        'easy',
+        'efficient',
+        'as needed',
+        'as required',
+        'if possible',
+        'where applicable',
+        'etc',
+        'and/or',
+        'some',
+        'several',
+        'many',
+        'minimal',
+        'maximise',
+        'minimise',
+        'optimise',
+        'best',
+        'support',
+      ]
+    openEnded: ['including but not limited to', 'such as', 'for example', 'e.g.', 'i.e.']
+    ambiguousTime:
+      [
+        'soon',
+        'timely',
+        'real-time (without a bound)',
+        'periodically (without an interval)',
+        'immediately (without a bound)',
+      ]
+  numericRule: 'Every number carries a unit and a comparator (≤, ≥, within, at most, at least).'
+  negativeRule: "Prefer positive statements; a 'shall not' needs a testable observable."
+  tbdRule: 'TBD(<specific question>) is allowed only with an OpenQuestion row; bare TBD is rejected.'
+  lengthRule: '≤ 40 words; longer statements are usually compound.'
+  examples:
+    good:
+      - 'When a user submits a loan application, the system shall persist the application record within 2 seconds at the 95th percentile.'
+      - 'The system shall encrypt personal data at rest using AES-256 or an equivalent algorithm approved by the Globe security team.'
+    bad:
+      - text: 'The system should be fast and user-friendly.'
+        why: ['wrong modal', 'two qualities', 'no measure']
+      - text: 'The system shall allow users to upload and share files.'
+        why: ['two verbs → split into upload and share']
+      - text: 'The system shall support SSO.'
+        why: ["'support' is vague; name the protocol and the observable behaviour"]
+
+# ---------------------------------------------------------------------------
+# D. Characteristics — scored per requirement (individual) and per run (set).
+# Each has a check question and the Finding rule id the reviewer emits.
+# ---------------------------------------------------------------------------
+individualCharacteristics:
+  - id: 29148.necessary
+    name: Necessary
+    check: 'If removed, would a stakeholder need, goal, journey step or control go unmet? If not, it is gold-plating.'
+    severity: major
+  - id: 29148.appropriate
+    name: Appropriate
+    check: 'Is it stated at the product level (what/how well), not as a design decision (how)? Design belongs in CONSTR only when mandated.'
+    severity: minor
+  - id: 29148.unambiguous
+    name: Unambiguous
+    check: 'Can two engineers read it one way only? No banned terms, no pronouns without referents, defined terms only.'
+    severity: blocking
+  - id: 29148.complete
+    name: Complete
+    check: 'Does it need another sentence to be actionable (missing condition, object, bound)?'
+    severity: major
+  - id: 29148.singular
+    name: Singular
+    check: 'One subject, one verb, one object; no conjunction joining two obligations.'
+    severity: blocking
+  - id: 29148.feasible
+    name: Feasible
+    check: 'Achievable within stated constraints (platform, budget, law, physics). Flag, do not delete.'
+    severity: major
+  - id: 29148.verifiable
+    name: Verifiable
+    check: 'Is there a finite, affordable way to show it is met, and is `verification` set accordingly?'
+    severity: blocking
+  - id: 29148.correct
+    name: Correct
+    check: 'Does it faithfully reflect its source anchors/facts? No invented numbers or actors.'
+    severity: blocking
+  - id: 29148.conforming
+    name: Conforming
+    check: 'Matches the grammar and attribute rules above.'
+    severity: minor
+
+setCharacteristics:
+  - id: 29148.set.complete
+    check: 'Every mandatory section populated or marked tbd with a question; every workflow step covered; every integration has an IF requirement; every data class has DATA and SEC coverage.'
+    severity: major
+  - id: 29148.set.consistent
+    check: 'No two requirements conflict or duplicate (use embedding candidates + pairwise check); terms used identically everywhere.'
+    severity: blocking
+  - id: 29148.set.feasible
+    check: 'The set as a whole is achievable; flag combinations that are not (e.g. offline-first + strict real-time consistency).'
+    severity: major
+  - id: 29148.set.comprehensible
+    check: 'Narratives read in order; a new reader can state the product in one paragraph after SEC-1.'
+    severity: minor
+  - id: 29148.set.validatable
+    check: 'Every requirement has a verification method and the methods collectively would convince the approver.'
+    severity: major
+
+traceabilityRules:
+  - { id: trace.no_source, check: 'Requirement with empty source', severity: blocking }
+  - { id: trace.derived_without_why, check: 'derived source lacking rationale', severity: blocking }
+  - {
+      id: trace.uncovered_step,
+      check: 'WorkflowModel step with no requirement and no out-of-scope note',
+      severity: major,
+    }
+  - { id: trace.tbd_without_question, check: 'TBD( ) without OpenQuestion', severity: blocking }
+  - { id: trace.orphan_question, check: 'OpenQuestion blocking nothing', severity: minor }
+
+# ---------------------------------------------------------------------------
+# E. Repair policy
+# ---------------------------------------------------------------------------
+repair:
+  maxPassesPerSection: 1
+  blockingRules:
+    [
+      29148.unambiguous,
+      29148.singular,
+      29148.verifiable,
+      29148.correct,
+      29148.set.consistent,
+      trace.no_source,
+      trace.derived_without_why,
+      trace.tbd_without_question,
+    ]
+  onResidual: 'Keep requirement, keep Finding open, surface in SEC-5.2 and as a Doc comment; never silently drop.'
+  humanOverride: 'Approver may accept a blocking finding; record Finding.status=accepted_by_human and Approval.overrides.'

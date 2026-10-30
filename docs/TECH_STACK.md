@@ -58,6 +58,10 @@ lives in `src/mastra/` (`index.ts` instance, `agents/`, `tools/`). ESM, no decor
 | ------------------------------------------------------- | -------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | @mastra/core                                            | ^1.78          | Agent, tools, Mastra instance                                                                                                                                                        |
 | @mastra/pg                                              | ^1.31          | Durable Mastra store (Postgres)                                                                                                                                                      |
+| drizzle-orm                                             | ^0.45          | PRDForge ledger schema + queries (`src/mastra/db/schema.ts`, Postgres schema `prdforge`); migrations in `drizzle/` run at boot (`db/bootstrap.ts`)                                   |
+| drizzle-kit (dev)                                       | ^0.31          | `pnpm db:generate` — regenerate migrations from the schema                                                                                                                           |
+| postgres                                                | ^3             | postgres.js driver for the ledger (one pool, `max: 5`)                                                                                                                               |
+| yaml                                                    | ^2             | Loads `rubrics/*.yaml` (derived IEEE 29148 rubric + Annex A catalogue) at boot                                                                                                       |
 | @mastra/memory                                          | ^1.38          | Conversation + working memory for agents                                                                                                                                             |
 | @mastra/mcp                                             | ^2.4           | MCP client for AgentBase-subscribed servers. 2.x serves only the 2026-07-28 MCP revision as a server; as a client it probes `server/discover` and falls back to the legacy handshake |
 | @mastra/loggers                                         | ^1.3           | PinoLogger for structured logs                                                                                                                                                       |
@@ -130,11 +134,11 @@ lives in `src/mastra/` (`index.ts` instance, `agents/`, `tools/`). ESM, no decor
 
 ## 4. Shared (`packages/shared/`)
 
-| Dependency  | Version | Purpose                         |
-| ----------- | ------- | ------------------------------- |
-| zod         | ^3      | Schema validation + env parsing |
-| @types/node | ^24     | `process` types for env parser  |
-| typescript  | ^5.9    | Type definitions                |
+| Dependency  | Version | Purpose                                                                                                                                    |
+| ----------- | ------- | ------------------------------------------------------------------------------------------------------------------------------------------ |
+| zod         | ^3      | Schema validation + env parsing; PRDForge domain types in `src/prdforge/types.ts`; the pure grammar pre-check in `src/prdforge/grammar.ts` |
+| @types/node | ^24     | `process` types for env parser                                                                                                             |
+| typescript  | ^5.9    | Type definitions                                                                                                                           |
 
 > `packages/shared` compiles to **ESM** (NodeNext) so Mastra's bundler can
 > statically analyze its named exports; relative imports use `.js` extensions.
